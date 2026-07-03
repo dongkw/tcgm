@@ -35,18 +35,18 @@ EASTMONEY_HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
-# Shared session that ignores environment proxy variables (HTTP_PROXY /
-# HTTPS_PROXY). Eastmoney APIs are directly reachable; respecting a flaky
-# local proxy causes spurious failures. If you genuinely need a proxy, set
-# the --proxy CLI flag or export EASTMONEY_PROXY.
+# 共享 HTTP 会话。
+#
+# 默认忽略环境变量里的 HTTP_PROXY / HTTPS_PROXY，避免本机代理不稳定时导致
+# 东方财富接口偶发失败。确实需要代理时，通过 CLI 的 --proxy 参数显式传入。
 # ---------------------------------------------------------------------------
 _SESSION = requests.Session()
 _SESSION.trust_env = False
-_EastmoneyProxy: str | None = None  # set via CLI --proxy
+_EastmoneyProxy: str | None = None  # 由 CLI --proxy 设置
 
 
 def _build_session() -> requests.Session:
-    """Return a Session that honours an explicit --proxy override if set."""
+    """返回请求会话；如设置了 --proxy，则优先使用显式代理。"""
     if _EastmoneyProxy:
         session = requests.Session()
         session.proxies = {"http": _EastmoneyProxy, "https": _EastmoneyProxy}
@@ -56,6 +56,7 @@ def _build_session() -> requests.Session:
 
 
 def exchange_prefix(code: str) -> str:
+    # 东方财富/腾讯接口用 1 表示沪市，0 表示深市。
     if code.startswith(("6", "9")):
         return "1"
     if code.startswith(("0", "2", "3")):
@@ -68,6 +69,7 @@ def market_suffix(code: str) -> str:
 
 
 def safe_float(value: Any, scale: float = 1.0) -> float | None:
+    # 行情/财务接口经常用 "-", "", None 表示缺失值，统一转成 None。
     if value in (None, "-", ""):
         return None
     try:
@@ -96,6 +98,7 @@ def parse_date(value: Any) -> date | None:
 
 
 def percentile_rank(values: list[float], current: float | None) -> float | None:
+    # 返回 current 在历史样本中的百分位：数值越高，代表估值/指标越靠近历史高位。
     values = [value for value in values if value is not None and value > 0]
     if not values or current is None:
         return None
@@ -110,7 +113,7 @@ def request_json(
     retries: int = 3,
     backoff: float = 1.5,
 ) -> dict[str, Any]:
-    """GET *url*, parse JSON, with retry + backoff on transient failures."""
+    """GET 请求并解析 JSON；对临时网络错误做重试和指数退避。"""
     session = _build_session()
     last_err: Exception | None = None
     for attempt in range(retries):
@@ -119,7 +122,7 @@ def request_json(
             response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as exc:
-            # Don't retry 4xx — the request itself is bad.
+            # 4xx 通常是参数或权限问题，重试没有意义，直接抛出。
             if 400 <= (exc.response.status_code if exc.response is not None else 400) < 500:
                 raise
             last_err = exc
@@ -137,8 +140,10 @@ def request_json_safe(
     retries: int = 2,
     label: str = "",
 ) -> dict[str, Any] | None:
-    """Like request_json but returns None on failure instead of raising.
-    Use for non-critical endpoints (e.g. announcements)."""
+    """request_json 的宽松版本；失败时返回 None。
+
+    用于公告、股东户数等非核心接口，避免单个数据缺口中断整次抓取。
+    """
     try:
         return request_json(url, params=params, retries=retries)
     except Exception as exc:
@@ -147,12 +152,13 @@ def request_json_safe(
 
 
 # ---------------------------------------------------------------------------
-# Quote via Tencent (qt.gtimg.cn) — push2.eastmoney.com is blocked in some
-# network environments. Tencent's API is widely accessible and returns all
-# the fields the decision engine needs.
+# 腾讯实时行情（qt.gtimg.cn）。
+#
+# 部分网络环境会屏蔽东方财富 push2 接口；腾讯行情接口更容易直连，并且能覆盖
+# 决策引擎当前所需的价格、成交额、PE、PB、市值等字段。
 # ---------------------------------------------------------------------------
 
-# Tencent quote field indices (split by "~")
+# 腾讯行情字段下标，原始字符串按 "~" 分隔。
 _TQ_PRICE = 3
 _TQ_PREV_CLOSE = 4
 _TQ_OPEN = 5
@@ -171,14 +177,14 @@ def _tencent_quote_url(code: str) -> str:
 
 
 def fetch_quote(code: str) -> dict[str, Any]:
-    """Fetch real-time quote from Tencent qt.gtimg.cn."""
+    """从腾讯 qt.gtimg.cn 获取实时行情快照。"""
     url = _tencent_quote_url(code)
     session = _build_session()
     resp = session.get(url, headers=EASTMONEY_HEADERS, timeout=15)
     resp.raise_for_status()
-    # Response format: v_sh601138="field0~field1~..."
+    # 返回格式示例：v_sh601138="field0~field1~..."
     text = resp.text
-    # Extract the quoted part inside "..."
+    # 只保留双引号内部的字段串。
     if '"' in text:
         text = text.split('"')[1]
     parts = text.split("~")
@@ -215,31 +221,31 @@ def fetch_quote(code: str) -> dict[str, Any]:
         "market_cap_yuan": None if market_cap_yi is None else market_cap_yi * 1e8,
         "pe_ttm": round_or_none(_f(_TQ_PE_TTM)),
         "pb": round_or_none(_f(_TQ_PB)),
-        "dividend_yield_pct": None,  # Tencent doesn't provide; compute from financials
-        "roe_pct_quote": None,  # Tencent doesn't provide
+        "dividend_yield_pct": None,  # 腾讯接口不提供，后续可由财报/分红数据补充。
+        "roe_pct_quote": None,  # 腾讯接口不提供。
         "net_margin_pct_quote": None,
         "trading_status": None,
     }
 
 
 # ---------------------------------------------------------------------------
-# Daily klines via Tencent (web.ifzq.gtimg.cn)
-# Format per row: [date, open, close, high, low, volume(lots)]
+# 腾讯日 K 线（web.ifzq.gtimg.cn）。
+#
+# 每行格式：[date, open, close, high, low, volume(lots)]。
 # ---------------------------------------------------------------------------
 
 _TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 
 
 def parse_kline(item: list[Any], prev_close: float | None = None) -> dict[str, Any]:
-    """Parse a Tencent-format kline row (6-element list)."""
+    """解析腾讯格式的单行 K 线。"""
     dt = str(item[0])
     o = float(item[1])
     c = float(item[2])
     h = float(item[3])
     lo = float(item[4])
     vol = float(item[5]) if len(item) > 5 else 0.0
-    # Tencent kline rows: [date, open, close, high, low, volume]
-    # prev_close is passed in from the caller (previous row's close)
+    # 腾讯 K 线不直接给昨收，调用方把上一根 K 线的收盘价传进来。
     pc = prev_close if prev_close is not None else o
     pct_change = (c / pc - 1) * 100 if pc and pc != 0 else 0.0
     amplitude = (h - lo) / pc * 100 if pc and pc != 0 else 0.0
@@ -250,18 +256,18 @@ def parse_kline(item: list[Any], prev_close: float | None = None) -> dict[str, A
         "high": h,
         "low": lo,
         "volume": vol,
-        "amount": 0.0,  # Tencent kline doesn't include amount
+        "amount": 0.0,  # 腾讯 K 线不包含成交额。
         "amplitude_pct": round(amplitude, 2),
         "pct_change": round(pct_change, 2),
         "change": round(c - pc, 2),
-        "turnover_pct": 0.0,  # not available
+        "turnover_pct": 0.0,  # 腾讯 K 线不包含换手率。
     }
 
 
 def fetch_daily_klines(
     code: str, begin: str = "20180101", limit: int = 1200
 ) -> list[dict[str, Any]]:
-    """Fetch daily klines from Tencent (前复权). Falls back to eastmoney on failure."""
+    """获取腾讯前复权日 K；失败时回退到东方财富历史 K 线接口。"""
     prefix = "sh" if exchange_prefix(code) == "1" else "sz"
     raw = request_json_safe(
         _TENCENT_KLINE_URL,
@@ -272,7 +278,7 @@ def fetch_daily_klines(
         label="tencent-klines",
     )
     if raw is None:
-        # Fallback: try eastmoney push2his (may work in some networks)
+        # 回退方案：尝试东方财富 push2his，某些网络环境下仍可用。
         return _fetch_klines_eastmoney(code, begin, limit)
     try:
         raw_rows = raw.get("data", {}).get(f"{prefix}{code}", {}).get("qfqday") or []
@@ -288,8 +294,8 @@ def fetch_daily_klines(
 
 
 def _fetch_klines_eastmoney(code: str, begin: str, limit: int) -> list[dict[str, Any]]:
-    """Legacy eastmoney kline fetcher as fallback."""
-    # Re-use the old csv-line parser but with a list wrapper
+    """旧版东方财富 K 线抓取器，作为腾讯接口失败时的兜底。"""
+    # 东方财富返回逗号分隔字符串，这里沿用旧解析方式并包装为 dict。
     def _legacy_parse(line: str) -> dict[str, Any]:
         parts = line.split(",")
         return {
@@ -330,12 +336,14 @@ def _fetch_klines_eastmoney(code: str, begin: str, limit: int) -> list[dict[str,
 
 
 def moving_average(rows: list[dict[str, Any]], window: int) -> float | None:
+    # 简单移动平均线，样本不足时返回 None，避免产生误导性指标。
     if len(rows) < window:
         return None
     return statistics.fmean(row["close"] for row in rows[-window:])
 
 
 def pct_change_from(rows: list[dict[str, Any]], periods: int) -> float | None:
+    # 计算相对 N 个交易日前收盘价的涨跌幅。
     if len(rows) <= periods:
         return None
     previous = rows[-periods - 1]["close"]
@@ -345,6 +353,7 @@ def pct_change_from(rows: list[dict[str, Any]], periods: int) -> float | None:
 
 
 def calc_atr_pct(rows: list[dict[str, Any]], window: int = 14) -> float | None:
+    # ATR 用于衡量波动率；这里转成占最新收盘价的百分比，便于不同股价之间比较。
     if len(rows) <= window:
         return None
     trs: list[float] = []
@@ -364,6 +373,7 @@ def calc_atr_pct(rows: list[dict[str, Any]], window: int = 14) -> float | None:
 
 
 def build_technical_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    # 汇总决策引擎需要的趋势、涨跌幅、波动率和最近 K 线。
     if not rows:
         return {"error": "no kline data"}
     last = rows[-1]
@@ -398,6 +408,7 @@ def build_technical_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def fetch_financial_main(code: str, page_size: int = 40) -> list[dict[str, Any]]:
+    # 东方财富 F10 主要财务指标，按报告期倒序返回。
     secucode = f"{code}.{market_suffix(code)}"
     raw = request_json(
         "https://datacenter.eastmoney.com/securities/api/data/v1/get",
@@ -415,6 +426,7 @@ def fetch_financial_main(code: str, page_size: int = 40) -> list[dict[str, Any]]
 
 
 def simplify_financial_row(row: dict[str, Any]) -> dict[str, Any]:
+    # 将东方财富原始字段名转换为更稳定、可读的内部字段名。
     parent_np = safe_float(row.get("PARENTNETPROFIT"))
     ocf = safe_float(row.get("NETCASH_OPERATE_PK"))
     return {
@@ -441,16 +453,19 @@ def simplify_financial_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def financial_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    # 财务快照只做机械筛查，不直接给投资结论。
     simplified = [simplify_financial_row(row) for row in rows]
     annual = [row for row in simplified if row["report_type"] == "年报"]
     latest = simplified[0] if simplified else None
     last_three_annual = annual[:3]
 
     ocf_ratios = [row["ocf_to_net_profit"] for row in last_three_annual]
+    # 连续三年经营现金流/归母净利润低于 0.5，标记为现金流质量风险。
     consecutive_low_ocf = (
         len(ocf_ratios) == 3
         and all(ratio is not None and ratio < 0.5 for ratio in ocf_ratios)
     )
+    # 最近两年扣非净利润为负，标记为盈利质量风险。
     deducted_negative_two_years = (
         len(last_three_annual) >= 2
         and all((row["deducted_net_profit_yuan"] or 0) < 0 for row in last_three_annual[:2])
@@ -476,6 +491,7 @@ def _fiscal_year(row: dict[str, Any]) -> int | None:
 
 
 def _period_key(row: dict[str, Any]) -> str | None:
+    # 将中文报告类型归一成估值计算使用的期间键。
     report_type = row.get("REPORT_TYPE")
     if report_type == "一季报":
         return "q1"
@@ -489,6 +505,7 @@ def _period_key(row: dict[str, Any]) -> str | None:
 
 
 def _ttm_eps_for_row(row: dict[str, Any], lookup: dict[tuple[int, str], dict[str, Any]]) -> float | None:
+    # TTM EPS = 当期累计 EPS + 上年年报 EPS - 上年同期累计 EPS。
     year = _fiscal_year(row)
     period = _period_key(row)
     eps = safe_float(row.get("EPSJB"))
@@ -504,6 +521,7 @@ def _ttm_eps_for_row(row: dict[str, Any], lookup: dict[tuple[int, str], dict[str
 
 
 def _book_value_per_share(row: dict[str, Any]) -> float | None:
+    # 用 ROE 反推归母权益，再除以总股本，得到粗略每股净资产。
     parent_np = safe_float(row.get("PARENTNETPROFIT"))
     roe_pct = safe_float(row.get("ROEJQ"))
     total_share = safe_float(row.get("TOTAL_SHARE"))
@@ -518,10 +536,10 @@ def valuation_snapshot(
     klines: list[dict[str, Any]],
     financial_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Approximate historical PE/PB bands from available daily prices + reported fundamentals.
+    """用日线价格和已披露财报粗略估算历史 PE/PB 区间。
 
-    This avoids an extra market-data dependency. It is good enough for screening,
-    but the JSON marks it as derived so valuation work can be manually checked.
+    这样可以减少额外行情依赖。结果适合初筛，JSON 中会明确标记为 derived，
+    估值判断仍需人工复核口径。
     """
     lookup: dict[tuple[int, str], dict[str, Any]] = {}
     reports: list[dict[str, Any]] = []
@@ -551,6 +569,7 @@ def valuation_snapshot(
         )
     effective_reports.sort(key=lambda item: item["notice_date"])
 
+    # 只使用近 5 年样本，且每个交易日只使用当时已经公告的最新财报。
     cutoff = date.today() - timedelta(days=365 * 5)
     pe_values: list[float] = []
     pb_values: list[float] = []
@@ -560,6 +579,7 @@ def valuation_snapshot(
         kline_date = parse_date(kline.get("date"))
         if kline_date is None or kline_date < cutoff:
             continue
+        # 将财报滚动推进到当前 K 线日期前已经披露的最新一份。
         while report_idx + 1 < len(effective_reports) and effective_reports[report_idx + 1]["notice_date"] <= kline_date:
             report_idx += 1
             current_report = effective_reports[report_idx]
@@ -599,6 +619,7 @@ def valuation_snapshot(
 
 
 def fetch_shareholder_count(code: str, page_size: int = 8) -> dict[str, Any]:
+    # 股东户数用于观察筹码集中度变化，接口通常按截止日期倒序返回。
     raw = request_json_safe(
         "https://datacenter.eastmoney.com/securities/api/data/v1/get",
         params={
@@ -637,6 +658,7 @@ def fetch_shareholder_count(code: str, page_size: int = 8) -> dict[str, Any]:
 
 
 def fetch_margin_trading(code: str, page_size: int = 20) -> dict[str, Any]:
+    # 融资融券余额用于观察杠杆资金变化；非两融标的可能返回空。
     raw = request_json_safe(
         "https://datacenter.eastmoney.com/securities/api/data/v1/get",
         params={
@@ -679,6 +701,7 @@ def fetch_margin_trading(code: str, page_size: int = 20) -> dict[str, Any]:
 
 
 def fetch_northbound_holding(code: str) -> dict[str, Any]:
+    # 北向持股是阶段性快照，不等同于当日净流入。
     raw = request_json_safe(
         "https://datacenter.eastmoney.com/securities/api/data/v1/get",
         params={
@@ -709,6 +732,7 @@ def fetch_northbound_holding(code: str) -> dict[str, Any]:
 
 
 def fetch_unlock_schedule(code: str, page_size: int = 20) -> dict[str, Any]:
+    # 只抓取今天之后的限售解禁，用于识别未来供给压力。
     today = date.today().isoformat()
     raw = request_json_safe(
         "https://datacenter.eastmoney.com/securities/api/data/v1/get",
@@ -742,6 +766,7 @@ def fetch_unlock_schedule(code: str, page_size: int = 20) -> dict[str, Any]:
 
 
 def fetch_announcements(code: str, keyword: str, page_size: int = 20) -> list[dict[str, Any]]:
+    # 按关键词抓公告标题和 PDF 链接；公告实质内容仍需人工读原文。
     secucode = f"{code}.{market_suffix(code)}"
     raw = request_json_safe(
         "https://np-anotice-stock.eastmoney.com/api/security/ann",
@@ -779,6 +804,7 @@ def fetch_announcements(code: str, keyword: str, page_size: int = 20) -> list[di
 
 
 def build_data_gaps(payload: dict[str, Any]) -> list[str]:
+    # 汇总无法可靠自动化的数据缺口，提醒决策引擎后续人工补齐。
     gaps: list[str] = []
     valuation = payload.get("valuation") or {}
     if valuation.get("pe_5y_median") is None or valuation.get("sample_days_pe", 0) < 200:
@@ -801,6 +827,7 @@ def build_data_gaps(payload: dict[str, Any]) -> list[str]:
 
 @dataclass
 class EngineFlags:
+    # 对应投资决策引擎中的机械规则标记；None 表示样本不足或接口缺失。
     a2_deducted_profit_negative_2y: bool | None
     c3_ocf_low_3y: bool | None
     short_term_above_ma20_and_rising: bool | None
@@ -811,6 +838,7 @@ class EngineFlags:
 
 
 def build_engine_flags(fin: dict[str, Any], tech: dict[str, Any]) -> EngineFlags:
+    # 将财务和技术面快照转换成决策引擎可直接读取的布尔标记。
     change_20d = tech.get("change_20d_pct")
     day_pct = tech.get("day_pct_change")
     return EngineFlags(
@@ -833,6 +861,7 @@ def build_engine_flags(fin: dict[str, Any], tech: dict[str, Any]) -> EngineFlags
 
 
 def build_payload(code: str, period: str) -> dict[str, Any]:
+    # 主流程：依次抓行情、K 线、财务、估值、公告和持仓结构数据。
     quote = fetch_quote(code)
     klines = fetch_daily_klines(code)
     technical = build_technical_snapshot(klines)
@@ -875,6 +904,7 @@ def build_payload(code: str, period: str) -> dict[str, Any]:
 
 
 def print_summary(payload: dict[str, Any]) -> None:
+    # 控制台摘要用于快速检查抓取结果；完整数据以 JSON 文件为准。
     quote = payload["quote"]
     tech = payload["technical"]
     latest = payload["financial"]["latest"] or {}
@@ -916,6 +946,7 @@ def print_summary(payload: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    # 命令行入口：解析参数、生成 payload、写入 JSON，并打印摘要。
     parser = argparse.ArgumentParser(description="Fetch single-stock decision-engine data.")
     parser.add_argument("code", help="A-share stock code, e.g. 601138")
     parser.add_argument(
@@ -938,7 +969,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.proxy:
-        # _EastmoneyProxy is module-level; update it so _build_session() picks it up.
+        # _EastmoneyProxy 是模块级变量，更新后 _build_session() 会自动使用它。
         globals()["_EastmoneyProxy"] = args.proxy
 
     code = args.code.strip()
