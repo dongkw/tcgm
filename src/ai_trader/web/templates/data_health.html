@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}数据健康 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div><h1>数据健康</h1><p>查看数据库同步、导入批次、校验问题和关键表计数。</p></div>
+  <div class="action-row">
+    <form method="post" action="{{ url_for('action_import_json') }}"><button type="submit">刷新导入</button></form>
+    <form method="post" action="{{ url_for('action_validate') }}"><button type="submit" class="secondary">执行校验</button></form>
+    <form method="post" action="{{ url_for('action_reconcile') }}"><button type="submit" class="secondary">执行对账</button></form>
+    <form method="post" action="{{ url_for('action_backup') }}"><button type="submit" class="secondary">生成备份</button></form>
+  </div>
+</section>
+<section class="metric-grid compact">
+  <div class="metric-card"><div class="metric-label">数据库</div><div class="metric-value">{{ validation.db_path | short_text(32) }}</div></div>
+  <div class="metric-card"><div class="metric-label">校验问题</div><div class="metric-value">{{ validation.issue_count }}</div></div>
+  <div class="metric-card"><div class="metric-label">状态</div><div class="metric-value"><span class="status-pill {{ ('OK' if validation.ok else 'ERROR') | status_class }}">{{ 'OK' if validation.ok else 'ERROR' }}</span></div></div>
+  <div class="metric-card"><div class="metric-label">同步状态</div><div class="metric-value"><span class="status-pill {{ sync.status | status_class }}">{{ sync.status }}</span></div></div>
+  <div class="metric-card"><div class="metric-label">同步问题</div><div class="metric-value">{{ sync.issue_count }}</div></div>
+  <div class="metric-card"><div class="metric-label">同步错误日志</div><div class="metric-value">{{ sync.sync_error_log_count }}</div></div>
+</section>
+<section class="layout-two">
+  <div class="panel">
+    <div class="panel-header"><h2>同步对账</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>对象</th><th>当前文件/记录</th><th>数据库行</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for table, count in sync.counts.items() %}
+          {% set row_status = 'OK' if count.db_rows >= count.files else 'WARNING' %}
+          <tr><td>{{ table }}</td><td>{{ count.files }}</td><td>{{ count.db_rows }}</td><td><span class="status-pill {{ row_status | status_class }}">{{ row_status }}</span></td></tr>
+          {% else %}
+          <tr><td colspan="4" class="muted">暂无同步计数。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h2>同步问题</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>等级</th><th>代码</th><th>对象</th><th>说明</th></tr></thead>
+        <tbody>
+          {% for issue in sync.issues %}
+          <tr><td><span class="status-pill {{ issue.severity | status_class }}">{{ issue.severity }}</span></td><td>{{ issue.code }}</td><td>{{ issue.table | dash }}</td><td>{{ issue.message }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="muted">当前文件都已索引到 SQLite。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+<section class="panel">
+  <div class="panel-header"><h2>最近同步错误</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>时间</th><th>类型</th><th>错误</th><th>说明</th></tr></thead>
+      <tbody>
+        {% for item in sync_errors %}
+        <tr><td>{{ item.created_at | dash }}</td><td>{{ item.sync_type | dash }}</td><td>{{ item.error_type | dash }}</td><td>{{ item.error_message | short_text(90) }}</td></tr>
+        {% else %}
+        <tr><td colspan="4" class="muted">暂无同步错误。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="panel">
+  <div class="panel-header"><h2>校验问题</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>等级</th><th>代码</th><th>表</th><th>行</th><th>说明</th></tr></thead>
+      <tbody>
+        {% for issue in validation.issues %}
+        <tr><td><span class="status-pill {{ issue.severity | status_class }}">{{ issue.severity }}</span></td><td>{{ issue.code }}</td><td>{{ issue.table | dash }}</td><td>{{ issue.row_id | dash }}</td><td>{{ issue.message }}</td></tr>
+        {% else %}
+        <tr><td colspan="5" class="muted">暂无校验问题。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="layout-two">
+  <div class="panel">
+    <div class="panel-header"><h2>最近导入</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>开始</th><th>批次</th><th>状态</th><th>记录</th><th>错误</th></tr></thead>
+        <tbody>
+          {% for item in batches %}
+          <tr><td>{{ item.started_at | dash }}</td><td>{{ item.batch_id | short_text(28) }}</td><td><span class="status-pill {{ item.status | status_class }}">{{ item.status | dash }}</span></td><td>{{ item.record_count | dash }}</td><td>{{ item.error_message | short_text(60) }}</td></tr>
+          {% else %}
+          <tr><td colspan="5" class="muted">暂无导入批次。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h2>表计数</h2></div>
+    <div class="table-wrap small-table">
+      <table>
+        <tbody>
+          {% for table, count in table_counts.items() %}
+          <tr><th>{{ table }}</th><td>{{ count if count is not none else 'MISSING' }}</td></tr>
+          {% else %}
+          <tr><td class="muted">暂无表计数。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

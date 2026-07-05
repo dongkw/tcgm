@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}历史回放 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header"><div><h1>历史回放</h1><p>查看回放实验收益、回撤、交易次数和策略版本。</p></div></section>
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>回放ID</th><th>账户</th><th>区间</th><th>初始资金</th><th>最终资产</th><th>收益率</th><th>最大回撤</th><th>交易</th><th>胜率</th><th>策略</th><th>状态</th></tr></thead>
+      <tbody>
+        {% for item in replays %}
+        <tr><td>{{ item.replay_id | short_text(28) }}</td><td>{{ item.account_id | dash }}</td><td>{{ item.start_date | dash }} ~ {{ item.end_date | dash }}</td><td>{{ item.initial_cash | money }}</td><td>{{ item.final_assets | money }}</td><td>{{ item.total_return_pct | pct }}</td><td>{{ item.max_drawdown_pct | pct }}</td><td>{{ item.trade_count | dash }}</td><td>{{ item.win_rate | pct }}</td><td>{{ item.strategy_version | dash }}</td><td><span class="status-pill {{ item.status | status_class }}">{{ item.status | dash }}</span></td></tr>
+        {% else %}
+        <tr><td colspan="11" class="muted">暂无回放记录。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

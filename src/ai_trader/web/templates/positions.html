@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}持仓 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header"><div><h1>持仓</h1><p>重点看可卖数量、T+1 锁定、证伪点和止损价。</p></div></section>
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>账户</th><th>代码</th><th>名称</th><th>类型</th><th>总数量</th><th>可卖</th><th>T+1锁定</th><th>成本</th><th>现价</th><th>市值</th><th>浮盈亏</th><th>仓位</th><th>证伪点</th><th>止损价</th><th>状态</th></tr>
+      </thead>
+      <tbody>
+        {% for item in positions %}
+        <tr class="{{ 'row-warning' if item.locked_quantity else '' }}">
+          <td>{{ item.account_id | dash }}</td><td>{{ item.symbol | dash }}</td><td>{{ item.name | dash }}</td><td>{{ item.asset_type | dash }}</td>
+          <td>{{ item.total_quantity | dash }}</td><td>{{ item.available_quantity | dash }}</td><td>{{ item.locked_quantity | dash }}</td>
+          <td>{{ item.avg_cost | money }}</td><td>{{ item.market_price | money }}</td><td>{{ item.market_value | money }}</td>
+          <td>{{ item.unrealized_pnl | money }} / {{ item.unrealized_pnl_pct | pct }}</td><td>{{ item.position_pct | pct }}</td>
+          <td>{{ item.invalidation_point | money }}</td><td>{{ item.stop_loss_price | money }}</td>
+          <td><span class="status-pill {{ item.position_status | status_class }}">{{ item.position_status | dash }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="15" class="muted">暂无持仓数据。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

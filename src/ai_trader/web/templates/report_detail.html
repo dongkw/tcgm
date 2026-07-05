@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}报告详情 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div><h1>{{ report.title | dash }}</h1><p>{{ report.report_type | dash }} · {{ report.symbol | dash }} · {{ report.created_at | dash }}</p></div>
+  <a class="button-link secondary" href="{{ url_for('reports_page') }}">返回报告</a>
+</section>
+<section class="panel">
+  <div class="metadata-grid">
+    <div><span>路径</span><strong>{{ report.relative_path | dash }}</strong></div>
+    <div><span>交易日</span><strong>{{ report.trade_date | dash }}</strong></div>
+    <div><span>策略版本</span><strong>{{ report.strategy_version | dash }}</strong></div>
+  </div>
+  <pre class="markdown-preview">{{ report.content }}</pre>
+</section>
+{% endblock %}

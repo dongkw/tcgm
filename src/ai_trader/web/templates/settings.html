@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}设置 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header"><div><h1>设置</h1><p>查看本地运行配置。第一版不在界面录入敏感配置。</p></div></section>
+<section class="panel">
+  <div class="metadata-grid settings-grid">
+    {% for key, value in info.items() %}
+    <div><span>{{ key }}</span><strong>{{ value | dash }}</strong></div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

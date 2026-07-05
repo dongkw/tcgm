@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}报告 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header"><div><h1>报告</h1><p>集中查看本地 Markdown 报告。</p></div></section>
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>生成时间</th><th>类型</th><th>标题</th><th>代码</th><th>交易日</th><th>路径</th><th>打开</th></tr></thead>
+      <tbody>
+        {% for item in reports %}
+        <tr><td>{{ item.created_at | dash }}</td><td>{{ item.report_type | dash }}</td><td>{{ item.title | short_text(70) }}</td><td>{{ item.symbol | dash }}</td><td>{{ item.trade_date | dash }}</td><td>{{ item.relative_path | short_text(70) }}</td><td><a href="{{ url_for('report_detail_page', report_id=item.report_id) }}">查看</a></td></tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">暂无报告。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

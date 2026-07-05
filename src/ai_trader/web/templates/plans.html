@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}风控与组合 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header"><div><h1>风控与组合</h1><p>查看风控阻塞、组合计划和待确认意图。</p></div></section>
+
+<section class="panel">
+  <div class="panel-header"><h2>风控检查</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>时间</th><th>账户</th><th>代码</th><th>原动作</th><th>允许动作</th><th>状态</th><th>等级</th><th>最大金额</th><th>最大数量</th><th>人工复核</th></tr></thead>
+      <tbody>
+        {% for item in risk_checks %}
+        <tr>
+          <td>{{ item.created_at | dash }}</td><td>{{ item.account_id | dash }}</td><td>{{ item.symbol | dash }}</td>
+          <td>{{ item.original_action | dash }}</td><td>{{ item.allowed_action | dash }}</td>
+          <td><span class="status-pill {{ item.risk_status | status_class }}">{{ item.risk_status | dash }}</span></td>
+          <td>{{ item.risk_level | dash }}</td><td>{{ item.max_cash_amount | money }}</td><td>{{ item.max_quantity | dash }}</td>
+          <td>{{ '是' if item.human_review_required else '否' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="muted">暂无风控数据。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="layout-two">
+  <div class="panel">
+    <div class="panel-header"><h2>组合计划</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>交易日</th><th>账户</th><th>预算</th><th>计划买入</th><th>候选</th><th>拒绝</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for item in allocation_plans %}
+          <tr><td>{{ item.trade_date | dash }}</td><td>{{ item.account_id | dash }}</td><td>{{ item.buy_budget | money }}</td><td>{{ item.planned_buy_amount | money }}</td><td>{{ item.candidate_count | dash }}</td><td>{{ item.rejected_count | dash }}</td><td><span class="status-pill {{ item.status | status_class }}">{{ item.status | dash }}</span></td></tr>
+          {% else %}
+          <tr><td colspan="7" class="muted">暂无组合计划。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h2>订单意图</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>排名</th><th>代码</th><th>方向</th><th>金额</th><th>数量</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for item in order_intents %}
+          <tr><td>{{ item.rank | dash }}</td><td>{{ item.symbol | dash }}</td><td>{{ item.side | dash }}</td><td>{{ item.planned_cash_amount | money }}</td><td>{{ item.planned_quantity | dash }}</td><td><span class="status-pill {{ item.status | status_class }}">{{ item.status | dash }}</span></td></tr>
+          {% else %}
+          <tr><td colspan="6" class="muted">暂无订单意图。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}决策 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div><h1>决策</h1><p>筛选和追溯买入、持仓、卖出评估。</p></div>
+</section>
+<section class="filter-bar">
+  <form method="get">
+    <label>代码 <input name="symbol" value="{{ filters.symbol }}"></label>
+    <label>动作 <input name="action" value="{{ filters.action }}"></label>
+    <label>任务 <input name="task_type" value="{{ filters.task_type }}"></label>
+    <button type="submit">筛选</button>
+    <a class="button-link secondary" href="{{ url_for('decisions_page') }}">清空</a>
+  </form>
+</section>
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>决策时间</th><th>交易日</th><th>代码</th><th>名称</th><th>任务</th><th>最终动作</th><th>置信度</th><th>策略版本</th><th>人工复核</th><th>理由</th></tr></thead>
+      <tbody>
+        {% for item in decisions %}
+        <tr>
+          <td>{{ item.decision_time | dash }}</td><td>{{ item.trade_date | dash }}</td><td>{{ item.symbol | dash }}</td><td>{{ item.name | dash }}</td>
+          <td>{{ item.task_type | dash }}</td><td><span class="status-pill {{ item.final_action | status_class }}">{{ item.final_action | dash }}</span></td>
+          <td>{{ item.confidence | dash }}</td><td>{{ item.strategy_version | dash }}</td><td>{{ '是' if item.human_review_required else '否' }}</td>
+          <td>{{ item.action_reason | short_text(80) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="muted">暂无决策数据。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

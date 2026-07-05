@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}账户 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header"><div><h1>账户</h1><p>查看本金、现金、持仓市值和账户仓位。</p></div></section>
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>账户</th><th>类型</th><th>初始资金</th><th>可用现金</th><th>冻结</th><th>持仓市值</th><th>总资产</th><th>现金比例</th><th>权益仓位</th><th>交易日</th><th>更新</th></tr>
+      </thead>
+      <tbody>
+        {% for item in accounts %}
+        <tr>
+          <td>{{ item.account_id }}</td><td>{{ item.account_type | dash }}</td><td>{{ item.initial_cash | money }}</td>
+          <td>{{ item.available_cash | money }}</td><td>{{ item.frozen_cash | money }}</td><td>{{ item.market_value | money }}</td>
+          <td>{{ item.total_assets | money }}</td><td>{{ item.cash_pct | pct }}</td><td>{{ item.equity_position_pct | pct }}</td>
+          <td>{{ item.trade_date | dash }}</td><td>{{ item.updated_at | dash }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="11" class="muted">暂无账户数据。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

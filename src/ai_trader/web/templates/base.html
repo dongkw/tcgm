@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}天才交易员{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">T</div>
+        <div>
+          <div class="brand-title">天才交易员</div>
+          <div class="brand-subtitle">本地工作台</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="nav-link {{ 'active' if active == 'dashboard' else '' }}" href="{{ url_for('dashboard_page') }}">总览</a>
+        <a class="nav-link {{ 'active' if active == 'accounts' else '' }}" href="{{ url_for('accounts_page') }}">账户</a>
+        <a class="nav-link {{ 'active' if active == 'positions' else '' }}" href="{{ url_for('positions_page') }}">持仓</a>
+        <a class="nav-link {{ 'active' if active == 'decisions' else '' }}" href="{{ url_for('decisions_page') }}">决策</a>
+        <a class="nav-link {{ 'active' if active == 'plans' else '' }}" href="{{ url_for('plans_page') }}">风控与组合</a>
+        <a class="nav-link {{ 'active' if active == 'workflows' else '' }}" href="{{ url_for('workflows_page') }}">工作流</a>
+        <a class="nav-link {{ 'active' if active == 'replays' else '' }}" href="{{ url_for('replays_page') }}">历史回放</a>
+        <a class="nav-link {{ 'active' if active == 'strategy_iterations' else '' }}" href="{{ url_for('strategy_iterations_page') }}">策略迭代</a>
+        <a class="nav-link {{ 'active' if active == 'reports' else '' }}" href="{{ url_for('reports_page') }}">报告</a>
+        <a class="nav-link {{ 'active' if active == 'data_health' else '' }}" href="{{ url_for('data_health_page') }}">数据健康</a>
+        <a class="nav-link {{ 'active' if active == 'settings' else '' }}" href="{{ url_for('settings_page') }}">设置</a>
+      </nav>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="topbar-left">
+          <span>自然日 {{ topbar.calendar_date }}</span>
+          <span>当前时间 {{ topbar.now }}</span>
+        </div>
+        <div class="topbar-right">
+          <span class="status-pill {{ topbar.db_status | status_class }}">数据库 {{ topbar.db_status }}</span>
+          <span class="status-pill {{ topbar.sync_status | status_class }}">同步 {{ topbar.sync_status }}</span>
+          <span class="status-pill {{ topbar.import_status | status_class }}">导入 {{ topbar.import_status }}</span>
+        </div>
+      </header>
+
+      <main class="content">
+        {% if message %}
+          <div class="notice notice-ok">{{ message }}</div>
+        {% endif %}
+        {% if error %}
+          <div class="notice notice-error">{{ error }}</div>
+        {% endif %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  <script src="{{ url_for('static', path='/js/app.js') }}"></script>
+</body>
+</html>

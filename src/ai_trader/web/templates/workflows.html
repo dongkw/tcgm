@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}工作流 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header"><div><h1>工作流</h1><p>查看盘前、盘中、盘后运行记录和触发事件。</p></div></section>
+<section class="panel">
+  <div class="panel-header"><h2>运行记录</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>开始</th><th>类型</th><th>账户</th><th>交易日</th><th>阶段</th><th>交易日?</th><th>状态</th><th>错误</th></tr></thead>
+      <tbody>
+        {% for item in runs %}
+        <tr><td>{{ item.started_at | dash }}</td><td>{{ item.workflow_type | dash }}</td><td>{{ item.account_id | dash }}</td><td>{{ item.trade_date | dash }}</td><td>{{ item.session_name | dash }}</td><td>{{ '是' if item.is_trading_day else '否' }}</td><td><span class="status-pill {{ item.status | status_class }}">{{ item.status | dash }}</span></td><td>{{ item.error_message | short_text(60) }}</td></tr>
+        {% else %}
+        <tr><td colspan="8" class="muted">暂无工作流记录。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="layout-two">
+  <div class="panel">
+    <div class="panel-header"><h2>盘中扫描</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>时间</th><th>账户</th><th>交易日</th><th>扫描</th><th>触发</th><th>阻塞</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for item in scans %}
+          <tr><td>{{ item.started_at | dash }}</td><td>{{ item.account_id | dash }}</td><td>{{ item.trade_date | dash }}</td><td>{{ item.symbols_scanned | dash }}</td><td>{{ item.trigger_count | dash }}</td><td>{{ item.blocked_count | dash }}</td><td><span class="status-pill {{ item.status | status_class }}">{{ item.status | dash }}</span></td></tr>
+          {% else %}
+          <tr><td colspan="7" class="muted">暂无盘中扫描。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h2>触发事件</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>时间</th><th>代码</th><th>事件</th><th>触发价</th><th>当前价</th><th>建议</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for item in events %}
+          <tr><td>{{ item.created_at | dash }}</td><td>{{ item.symbol | dash }}</td><td>{{ item.event_type | dash }}</td><td>{{ item.trigger_price | money }}</td><td>{{ item.current_price | money }}</td><td>{{ item.suggested_action | dash }}</td><td><span class="status-pill {{ item.risk_status | status_class }}">{{ item.risk_status | dash }}</span></td></tr>
+          {% else %}
+          <tr><td colspan="7" class="muted">暂无触发事件。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}
