@@ -23,6 +23,7 @@ data/portfolio_construction/
 data/workflows/
 data/intraday/
 data/strategy_iterations/
+data/strategy_platform/
 data/historical/
 data/replay/
 data/reports/

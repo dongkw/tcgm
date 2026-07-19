@@ -1,0 +1,16 @@
+{
+  "strategy_id": "ai-research",
+  "name": "AI 研究判断",
+  "strategy_family": "AI_RESEARCH",
+  "strategy_version": "0.2.0",
+  "parameter_version": "2",
+  "task_type": "BUY",
+  "implementation_type": "AI_BASED",
+  "maturity": "DRAFT",
+  "calibration_status": "UNCALIBRATED",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": [],
+  "optional_features": ["technical.ma20", "technical.ma60", "valuation.pe_ttm", "valuation.pb"],
+  "enabled": true
+}

@@ -1,0 +1,21 @@
+{
+  "strategy_id": "technical-exit",
+  "name": "技术退出",
+  "strategy_family": "HOLDING_EXIT",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "HOLDING",
+  "implementation_type": "RULE_BASED",
+  "maturity": "PAPER_ONLY",
+  "calibration_status": "UNCALIBRATED",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "INTRADAY", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": [
+    "technical.ma20",
+    "technical.ma60",
+    "technical.low_20d",
+    "technical.change_20d_pct"
+  ],
+  "optional_features": [],
+  "enabled": true
+}

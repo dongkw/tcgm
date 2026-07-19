@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}历史数据 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <h1>历史数据</h1>
+    <p>查看已固定的日终历史快照和市场数据采集批次。</p>
+  </div>
+  <div class="action-row">
+    <a class="button-link secondary" href="{{ url_for('post_market_data_prep_page') }}">盘后数据准备</a>
+  </div>
+</section>
+
+<section class="layout-two">
+  <div class="panel">
+    <div class="panel-header"><h2>交易日覆盖</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>交易日</th><th>总数</th><th>真实采集</th><th>回补</th></tr></thead>
+        <tbody>
+          {% for item in counts %}
+          <tr><td>{{ item.trade_date | dash }}</td><td>{{ item.count | dash }}</td><td>{{ item.live_count | dash }}</td><td>{{ item.backfill_count | dash }}</td></tr>
+          {% else %}
+          <tr><td colspan="4" class="muted">暂无历史日终快照。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h2>采集批次</h2></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>开始</th><th>批次</th><th>类型</th><th>交易日</th><th>状态</th><th>成功/失败</th></tr></thead>
+        <tbody>
+          {% for batch in batches %}
+          <tr>
+            <td>{{ batch.started_at | datetime }}</td>
+            <td>{{ batch.batch_id | short_text(26) }}</td>
+            <td>{{ batch.batch_type | dash }}</td>
+            <td>{{ batch.trade_date | dash }}</td>
+            <td><span class="status-pill {{ batch.status | status_class }}">{{ batch.status | dash }}</span></td>
+            <td>{{ batch.success_count | dash }} / {{ batch.failed_count | dash }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="muted">暂无采集批次。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2>最近日终快照</h2>
+    {% if latest_trade_date %}<span class="muted">交易日：{{ latest_trade_date }}</span>{% endif %}
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>代码</th><th>名称</th><th>收盘</th><th>涨跌幅</th><th>PE</th><th>PB</th><th>MA20</th><th>MA60</th><th>来源</th><th>质量</th><th>采集时间</th></tr>
+      </thead>
+      <tbody>
+        {% for item in snapshots %}
+        <tr>
+          <td>{{ item.symbol | dash }}</td>
+          <td>{{ item.name | dash }}</td>
+          <td>{{ item.close | money }}</td>
+          <td>{{ item.pct_change | pct }}</td>
+          <td>{{ item.pe_ttm | money }}</td>
+          <td>{{ item.pb | money }}</td>
+          <td>{{ item.ma20 | money }}</td>
+          <td>{{ item.ma60 | money }}</td>
+          <td>{{ item.data_origin | dash }}</td>
+          <td><span class="status-pill {{ item.quality_status | status_class }}">{{ item.quality_status | dash }}</span></td>
+          <td>{{ item.observed_at | datetime }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="11" class="muted">暂无日终历史快照。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

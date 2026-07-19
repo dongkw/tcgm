@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}策略输入 - 天才交易员{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <h1>{{ name | dash }} {{ symbol }}</h1>
+    <p>策略研究输入 / {% if position %}持仓 {{ position.account_id }}{% else %}当前无持仓{% endif %}</p>
+  </div>
+  <div class="action-row">
+    <a class="button-link secondary" href="{{ url_for('decisions_page') }}?symbol={{ symbol }}">返回决策</a>
+    <a class="button-link secondary" href="{{ url_for('strategies_page') }}">查看策略库</a>
+  </div>
+</section>
+
+<section class="metadata-grid">
+  <div><span>最新价格</span><strong>{{ quote.price | money }}</strong></div>
+  <div><span>行情交易日</span><strong>{{ quote.trade_date | dash }}</strong></div>
+  <div><span>持仓数量</span><strong>{% if position %}{{ position.total_quantity | dash }}{% else %}-{% endif %}</strong></div>
+  <div><span>持仓成本</span><strong>{% if position %}{{ position.avg_cost | money }}{% else %}-{% endif %}</strong></div>
+  <div><span>当前仓位</span><strong>{% if position %}{{ position.position_pct | pct }}{% else %}-{% endif %}</strong></div>
+  <div><span>输入更新时间</span><strong>{{ profile.updated_at | datetime }}</strong></div>
+</section>
+
+<form method="post" action="{{ url_for('action_strategy_context_save') }}">
+  <input type="hidden" name="symbol" value="{{ symbol }}">
+
+  <section class="panel">
+    <div class="panel-header"><h2>周期与估值</h2></div>
+    <div class="form-grid">
+      <div class="form-row">
+        <label><span>持有周期</span><select name="holding_period"><option value="">未知</option><option value="short" {{ 'selected' if profile.holding_period == 'short' else '' }}>短线 / 波段</option><option value="middle" {{ 'selected' if profile.holding_period == 'middle' else '' }}>中线 1-2 年</option><option value="long" {{ 'selected' if profile.holding_period == 'long' else '' }}>长线 3 年以上</option></select></label>
+        <label><span>股票类型</span><select name="stock_type"><option value="">未知</option><option value="STABLE" {{ 'selected' if profile.stock_type == 'STABLE' else '' }}>稳定价值</option><option value="GROWTH" {{ 'selected' if profile.stock_type == 'GROWTH' else '' }}>成长</option><option value="CYCLICAL" {{ 'selected' if profile.stock_type == 'CYCLICAL' else '' }}>周期</option><option value="TURNAROUND" {{ 'selected' if profile.stock_type == 'TURNAROUND' else '' }}>困境反转</option></select></label>
+      </div>
+      <div class="form-row">
+        <label><span>未来第 3 年 EPS</span><input name="future_eps" type="number" min="0" step="0.0001" value="{{ profile.future_eps or '' }}"></label>
+        <label><span>高风险标的</span><select name="high_risk">{% with value=profile.high_risk %}{% include "strategy_context_bool_options.html" %}{% endwith %}</select></label>
+      </div>
+      <label><span>未来 1-2 年利润或自由现金流改善假设</span><textarea name="medium_term_improvement" rows="3">{{ profile.medium_term_improvement or '' }}</textarea></label>
+      <label><span>量化跟踪指标</span><textarea name="tracking_metric" rows="2">{{ profile.tracking_metric or '' }}</textarea></label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header"><h2>三段式投资逻辑</h2></div>
+    <div class="form-grid">
+      <label><span>核心逻辑</span><textarea name="core_logic" rows="4">{{ suggested_core_logic }}</textarea></label>
+      <label><span>验证催化剂及最晚时间</span><textarea name="catalyst" rows="3">{{ profile.catalyst or '' }}</textarea></label>
+      <label><span>基本面证伪信号</span><textarea name="fundamental_invalidation" rows="2">{{ profile.fundamental_invalidation or '' }}</textarea></label>
+      <label><span>技术 / 价格证伪信号</span><textarea name="technical_invalidation" rows="2">{{ suggested_technical_invalidation }}</textarea></label>
+      <label><span>事件证伪信号</span><textarea name="event_invalidation" rows="2">{{ profile.event_invalidation or '' }}</textarea></label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header"><h2>长线基础与持仓复核</h2></div>
+    <div class="form-grid">
+      <div class="strategy-context-option-grid">
+        {% for field, label, field_value in [
+          ('business_model_stable', '商业模式稳定', profile.business_model_stable),
+          ('profit_quality_5y', '近 5 年盈利质量良好', profile.profit_quality_5y),
+          ('cashflow_reliable', '现金流可靠', profile.cashflow_reliable),
+          ('competition_not_worse', '竞争格局未恶化', profile.competition_not_worse)
+        ] %}
+        <label><span>{{ label }}</span><select name="{{ field }}">{% with value=field_value %}{% include "strategy_context_bool_options.html" %}{% endwith %}</select></label>
+        {% endfor %}
+      </div>
+      <div class="strategy-context-option-grid holding-review-grid">
+        {% for field, label, field_value in [
+          ('logic_still_valid', '原买入逻辑仍成立', profile.logic_still_valid),
+          ('thesis_fully_realized', '逻辑已充分兑现', profile.thesis_fully_realized),
+          ('would_rebuy_now', '当前价仍愿重新买入', profile.would_rebuy_now)
+        ] %}
+        <label><span>{{ label }}</span><select name="{{ field }}">{% with value=field_value %}{% include "strategy_context_bool_options.html" %}{% endwith %}</select></label>
+        {% endfor %}
+      </div>
+      <div class="action-row">
+        <button type="submit" name="next_action" value="analyze">保存并生成分析</button>
+        <button type="submit" class="secondary" name="next_action" value="save">仅保存</button>
+      </div>
+    </div>
+  </section>
+</form>
+
+<section class="panel">
+  <div class="panel-header"><h2>输入修订记录</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>时间</th><th>来源</th><th>周期</th><th>类型</th><th>未来 EPS</th><th>核心逻辑</th></tr></thead>
+      <tbody>
+        {% for item in revisions %}
+        <tr><td>{{ item.created_at | datetime }}</td><td>{{ item.source }}</td><td>{{ item.payload.holding_period | dash }}</td><td>{{ item.payload.stock_type | dash }}</td><td>{{ item.payload.future_eps | dash }}</td><td class="wrap-cell">{{ item.payload.core_logic | short_text(80) }}</td></tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">暂无修订记录。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

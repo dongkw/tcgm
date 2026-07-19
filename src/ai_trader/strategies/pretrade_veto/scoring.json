@@ -1,0 +1,19 @@
+{
+  "strategy_id": "pretrade-veto",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "base_score": 50,
+  "min_score": 0,
+  "max_score": 100,
+  "rule_weights": {
+    "A-1": {"PASS": 0, "WARN": 0},
+    "A-2": {"PASS": 0, "FAIL": -50},
+    "A-3": {"PASS": 0, "WARN": 0},
+    "A-4": {"PASS": 0, "FAIL": -50}
+  },
+  "thresholds": [
+    {"min_score": 50, "signal": "NEUTRAL"},
+    {"min_score": 25, "signal": "OPPOSE"},
+    {"min_score": 0, "signal": "STRONG_OPPOSE"}
+  ]
+}

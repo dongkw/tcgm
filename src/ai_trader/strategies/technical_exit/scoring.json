@@ -1,0 +1,20 @@
+{
+  "strategy_id": "technical-exit",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "base_score": 0,
+  "min_score": 0,
+  "max_score": 100,
+  "rule_weights": {
+    "TE_ORIGINAL_INVALIDATION": {"PASS": 100, "WARN": 10, "NOT_APPLICABLE": 0},
+    "TE_BREAK_LOW20": {"PASS": 90, "FAIL": 0},
+    "TE_BREAK_MA60": {"PASS": 55, "FAIL": 0},
+    "TE_BREAK_MA20": {"PASS": 35, "FAIL": 0},
+    "TE_SURGE_PROFIT": {"PASS": 30, "FAIL": 0}
+  },
+  "thresholds": [
+    {"min_score": 75, "signal": "EXIT_SUPPORT"},
+    {"min_score": 30, "signal": "REDUCE_SUPPORT"},
+    {"min_score": 0, "signal": "HOLD_SUPPORT"}
+  ]
+}

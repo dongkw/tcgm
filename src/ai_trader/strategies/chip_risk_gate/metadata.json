@@ -1,0 +1,17 @@
+{
+  "strategy_id": "chip-risk-gate",
+  "name": "筹码风险闸门",
+  "strategy_family": "HARD_GATE_E",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "BUY",
+  "implementation_type": "RULE_BASED",
+  "maturity": "PAPER_ONLY",
+  "calibration_status": "UNCALIBRATED",
+  "aggregation_role": "VETO",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": ["ownership.shareholder_count.latest"],
+  "optional_features": ["ownership.margin_trading.latest", "ownership.northbound_holding.latest", "ownership.unlock_schedule", "announcements.减持", "announcements.回购", "technical.change_20d_pct"],
+  "enabled": true
+}

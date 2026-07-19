@@ -1,0 +1,1 @@
+"""Strategy platform tests."""

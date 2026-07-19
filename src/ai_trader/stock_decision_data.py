@@ -202,7 +202,9 @@ def fetch_quote(code: str) -> dict[str, Any]:
         "code": code,
         "name": name,
         "market": market_suffix(code),
-        "trade_date": date.today().isoformat(),
+        # The endpoint fields parsed here do not expose a reliable trade date.
+        # build_payload() assigns the latest confirmed daily K-line date.
+        "trade_date": None,
         "price": round_or_none(price),
         "open": round_or_none(_f(_TQ_OPEN)),
         "high": round_or_none(_f(_TQ_HIGH)),
@@ -865,6 +867,7 @@ def build_payload(code: str, period: str) -> dict[str, Any]:
     quote = fetch_quote(code)
     klines = fetch_daily_klines(code)
     technical = build_technical_snapshot(klines)
+    quote["trade_date"] = technical.get("last_date")
     financial_rows = fetch_financial_main(code)
     financial = financial_snapshot(financial_rows)
     valuation = valuation_snapshot(quote, klines, financial_rows)

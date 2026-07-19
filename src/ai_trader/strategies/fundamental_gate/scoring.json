@@ -1,0 +1,23 @@
+{
+  "strategy_id": "fundamental-gate",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "base_score": 50,
+  "min_score": 0,
+  "max_score": 100,
+  "rule_weights": {
+    "A-2": {"PASS": 0, "FAIL": -50},
+    "C-1": {"PASS": 0, "FAIL": -50},
+    "C-2": {"PASS": 0, "WARN": 0},
+    "C-3": {"PASS": 0, "FAIL": -50},
+    "C-4": {"UNKNOWN": 0},
+    "C-5": {"UNKNOWN": 0},
+    "C-6": {"PASS": 0, "WARN": 0},
+    "C-CASHFLOW-LATEST": {"PASS": 0, "WARN": 0}
+  },
+  "thresholds": [
+    {"min_score": 50, "signal": "NEUTRAL"},
+    {"min_score": 25, "signal": "OPPOSE"},
+    {"min_score": 0, "signal": "STRONG_OPPOSE"}
+  ]
+}

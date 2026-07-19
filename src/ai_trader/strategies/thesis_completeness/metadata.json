@@ -1,0 +1,17 @@
+{
+  "strategy_id": "thesis-completeness",
+  "name": "三段式投资逻辑",
+  "strategy_family": "HARD_GATE_F",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "BUY",
+  "implementation_type": "RULE_BASED",
+  "maturity": "DRAFT",
+  "calibration_status": "UNCALIBRATED",
+  "aggregation_role": "VETO",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": [],
+  "optional_features": ["decision_context.core_logic", "decision_context.buy_logic", "decision_context.catalyst", "decision_context.fundamental_invalidation", "decision_context.technical_invalidation", "decision_context.invalidation_point", "decision_context.event_invalidation"],
+  "enabled": true
+}

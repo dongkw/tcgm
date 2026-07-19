@@ -1,0 +1,17 @@
+{
+  "strategy_id": "fundamental-gate",
+  "name": "基本面硬否决",
+  "strategy_family": "HARD_GATE_C",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "BUY",
+  "implementation_type": "RULE_BASED",
+  "maturity": "PAPER_ONLY",
+  "calibration_status": "UNCALIBRATED",
+  "aggregation_role": "VETO",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": ["financial.annual_last_3", "engine_flags.a2_deducted_profit_negative_2y", "engine_flags.c3_ocf_low_3y"],
+  "optional_features": ["announcements.监管"],
+  "enabled": true
+}

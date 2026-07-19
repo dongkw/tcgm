@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 
 from ..portfolio import now_iso
@@ -48,7 +49,7 @@ def init_database(output_root: Path, db_path: str | None = None) -> dict[str, ob
 
     applied: list[str] = []
     skipped: list[str] = []
-    with connect(resolved) as conn:
+    with closing(connect(resolved)) as conn:
         _ensure_migration_table(conn)
         existing = {
             row["version"]: row["checksum"]

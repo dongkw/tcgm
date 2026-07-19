@@ -14,6 +14,82 @@
   </div>
 </section>
 
+{% if decision.is_strategy_platform %}
+<section class="metadata-grid">
+  <div><span>交易日</span><strong>{{ decision.trade_date | dash }}</strong></div>
+  <div><span>任务</span><strong>{{ decision.display_task | dash }}</strong></div>
+  <div><span>分析状态</span><strong class="status-pill {{ decision.status | status_class }}">{{ decision.status | dash }}</strong></div>
+  <div><span>综合结论</span><strong>{{ decision.display_action | dash }}</strong></div>
+  <div><span>有效 / 阻断 / 异常</span><strong>{{ decision.effective_strategy_count }} / {{ decision.blocked_strategy_count }} / {{ decision.failed_strategy_count }}</strong></div>
+  <div><span>分析 ID</span><strong>{{ decision.decision_id | dash }}</strong></div>
+</section>
+
+{% for section in decision.strategy_sections %}
+<section class="panel">
+  <div class="panel-header">
+    <h2>{{ section.title }}</h2>
+    <span class="status-pill {{ section.conclusion | status_class }}">{{ section.display_conclusion }}</span>
+  </div>
+  <div class="metadata-grid settings-grid">
+    <div><span>有效策略</span><strong>{{ section.effective_strategy_count | dash }}</strong></div>
+    <div><span>支持 / 反对</span><strong>{{ section.support_count | dash }} / {{ section.oppose_count | dash }}</strong></div>
+    <div><span>中性 / 未知</span><strong>{{ section.neutral_count | dash }} / {{ section.unknown_count | dash }}</strong></div>
+    <div><span>数据状态</span><strong>{{ section.data_quality.status | dash }}</strong></div>
+    <div><span>市场阶段</span><strong>{{ section.market_phase | dash }}</strong></div>
+    <div><span>数据截止</span><strong>{{ section.source_cutoff_time | datetime }}</strong></div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>策略</th><th>家族</th><th>角色</th><th>实现 / 成熟度</th><th>信号</th><th>原始分</th><th>数据 / 信心</th></tr></thead>
+      <tbody>
+        {% for evaluation in section.evaluations %}
+        <tr>
+          <td>{{ evaluation.display_name | dash }}</td>
+          <td>{{ evaluation.metadata.strategy_family | dash }}</td>
+          <td>{{ evaluation.metadata.aggregation_role | dash }}</td>
+          <td>{{ evaluation.metadata.implementation_type | dash }} / {{ evaluation.metadata.maturity | dash }}</td>
+          <td><span class="status-pill {{ evaluation.signal | status_class }}">{{ evaluation.display_signal | dash }}</span></td>
+          <td>{{ evaluation.display_score | dash }}</td>
+          <td>{{ evaluation.data_status | dash }} / {{ evaluation.confidence | dash }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="muted">没有可显示的策略结果。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header"><h2>{{ section.title }}规则证据</h2></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>策略</th><th>规则</th><th>状态</th><th>说明</th></tr></thead>
+      <tbody>
+        {% for evaluation in section.evaluations %}
+          {% for rule in evaluation.rule_results %}
+          <tr>
+            <td>{{ evaluation.display_name | dash }}</td>
+            <td>{{ rule.rule_id | dash }}</td>
+            <td><span class="status-pill {{ rule.status | status_class }}">{{ rule.status | dash }}</span></td>
+            <td class="wrap-cell">{{ rule.message | dash }}</td>
+          </tr>
+          {% else %}
+          <tr><td>{{ evaluation.display_name | dash }}</td><td colspan="3" class="muted">无有效规则结果{% if evaluation.error %}：{{ evaluation.error }}{% endif %}</td></tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if section.conflicts %}
+  <div class="notice warning">
+    {% for conflict in section.conflicts %}<div>{{ conflict.message | dash }}</div>{% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% else %}
 <section class="metadata-grid">
   <div><span>交易日</span><strong>{{ decision.trade_date | dash }}</strong></div>
   <div><span>任务</span><strong>{{ decision.display_task | dash }}</strong></div>
@@ -92,4 +168,5 @@
     <div><span>数据截止</span><strong>{{ decision.time_context.effective_data_cutoff | dash }}</strong></div>
   </div>
 </section>
+{% endif %}
 {% endblock %}

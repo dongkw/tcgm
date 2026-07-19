@@ -1,0 +1,16 @@
+{
+  "strategy_id": "ai-research",
+  "strategy_version": "0.2.0",
+  "parameter_version": "2",
+  "base_score": 50,
+  "min_score": 0,
+  "max_score": 100,
+  "rule_weights": {
+    "AI_RESEARCH_VIEW": {"PASS": 20, "WARN": 0, "FAIL": -20, "UNKNOWN": 0}
+  },
+  "thresholds": [
+    {"min_score": 70, "signal": "SUPPORT"},
+    {"min_score": 50, "signal": "NEUTRAL"},
+    {"min_score": 0, "signal": "OPPOSE"}
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "strategy_id": "holding-thesis-exit",
+  "name": "持仓逻辑退出",
+  "strategy_family": "HOLDING_THESIS",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "HOLDING",
+  "implementation_type": "RULE_BASED",
+  "maturity": "DRAFT",
+  "calibration_status": "UNCALIBRATED",
+  "aggregation_role": "VETO",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "INTRADAY", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": [],
+  "optional_features": ["decision_context.buy_logic", "decision_context.logic_still_valid", "decision_context.thesis_fully_realized", "decision_context.would_rebuy_now"],
+  "enabled": true
+}

@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import time
+from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-from ..build_decision import build_decision
-from ..decision_utils import ensure_dir, now_stamp
+from ..analysis_snapshot import build_analysis_snapshot
+from ..ai_interface.providers import provider_from_name
+from ..decision_utils import ensure_dir
 from ..db.consistency import reconcile_database
 from ..db.connection import connect
 from ..db.importers import import_json_ledgers
+from ..db.market_history import (
+    create_market_data_batch,
+    fail_market_data_batch,
+    finish_market_data_batch,
+    upsert_daily_market_snapshot,
+)
 from ..db.repositories import json_text
-from ..db.sync import mirror_record, mirror_report
+from ..db.strategy_contexts import CONTEXT_FIELDS, get_strategy_context, save_strategy_context
+from ..db.writers import relative_path, write_report
 from ..db.validators import backup_database, validate_database
 from ..db.watchlists import (
     bootstrap_watchlist_database,
@@ -27,9 +37,12 @@ from ..db.watchlists import (
     upsert_watchlist_item,
 )
 from ..stock_decision_data import build_payload
-from ..snapshot_builder import BUY_EVALUATION, HOLDING_REVIEW, build_strategy_snapshot
-from ..strategy_engine import run_strategy
-from ..timekeeper import build_time_context
+from ..strategies import build_builtin_registry
+from ..strategy_platform.contracts import TaskType
+from ..strategy_platform.pipeline import PipelineResult, StrategyPipeline
+from ..strategy_platform.report import write_analysis_session_report
+from ..strategy_platform.repositories import save_analysis_session, save_pipeline_result
+from ..timekeeper import _tzinfo, build_time_context
 from ..watchlist_screening import create_screen_run
 from ..watchlist_screening import evaluate_quote as evaluate_watchlist_quote
 from ..portfolio import compact_now, now_iso
@@ -333,6 +346,18 @@ def run_post_market_data_prep(
     run_id = f"postdata_{compact_now()}"
     with connect(settings.db_path) as conn:
         codes, source_by_symbol = _collect_scope_codes(conn, tab_ids=selected_tabs, include_positions=include_positions)
+        create_market_data_batch(
+            conn,
+            batch_id=run_id,
+            batch_type="POST_MARKET_SELECTED",
+            session_type="POST_MARKET",
+            scope_type="POSITIONS_WATCHLIST",
+            scope={"tab_ids": selected_tabs, "include_positions": include_positions, "symbols": codes},
+            total_count=len(codes),
+            source="post_market_data_prep",
+            params={"period": "middle"},
+            started_at=started_at,
+        )
         conn.execute(
             """
             INSERT INTO post_market_data_prep_runs (
@@ -362,6 +387,14 @@ def run_post_market_data_prep(
                 try:
                     payload = build_payload(code, "middle")
                     upsert_market_quote(conn, code, payload, source_path="post_market_data_prep")
+                    upsert_daily_market_snapshot(
+                        conn,
+                        code,
+                        payload,
+                        batch_id=run_id,
+                        data_origin="LIVE_CAPTURE",
+                        source_version="stock_decision_data.middle",
+                    )
                     quote = payload.get("quote") or {}
                     refreshed_codes.append(code)
                     row = {
@@ -406,6 +439,15 @@ def run_post_market_data_prep(
             failed_rows = [row for row in rows if row["status"] != "OK"]
             trade_date = max((str(row.get("trade_date") or "") for row in ok_rows if row.get("trade_date")), default=None)
             status = "OK" if not failed_rows else "PARTIAL" if ok_rows else "FAILED"
+            finish_market_data_batch(
+                conn,
+                batch_id=run_id,
+                trade_date=trade_date,
+                status=status,
+                success_count=len(ok_rows),
+                failed_count=len(failed_rows),
+                payload={"rows": rows, "valuation_sync": valuation_sync},
+            )
             conn.execute(
                 """
                 UPDATE post_market_data_prep_runs
@@ -431,6 +473,7 @@ def run_post_market_data_prep(
     except Exception as exc:  # noqa: BLE001 - mark batch failed.
         run_error = str(exc)
         with connect(settings.db_path) as conn:
+            fail_market_data_batch(conn, batch_id=run_id, error_message=run_error)
             conn.execute(
                 """
                 UPDATE post_market_data_prep_runs
@@ -452,6 +495,550 @@ def run_post_market_data_prep(
         "failed_codes": [row["code"] for row in failed_rows],
         "error": run_error,
     }
+
+
+def run_post_market_snapshot_prepare(settings: DashboardSettings) -> dict[str, Any]:
+    started_at = now_iso()
+    run_id = f"postready_{compact_now()}"
+    with connect(settings.db_path) as conn:
+        latest = conn.execute("SELECT MAX(trade_date) AS trade_date FROM daily_market_snapshots").fetchone()
+        trade_date = latest["trade_date"] if latest else None
+        if not trade_date:
+            raise ValueError("没有可用的日终历史快照，请先执行全市场采集或小范围补采")
+        positions = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT symbol, COALESCE(name, symbol) AS name
+                FROM positions
+                WHERE COALESCE(position_status, 'ACTIVE') != 'CLOSED'
+                  AND COALESCE(total_quantity, 0) > 0
+                ORDER BY symbol
+                """
+            ).fetchall()
+        ]
+        conn.execute(
+            """
+            INSERT INTO post_market_data_prep_runs (
+                run_id, trade_date, source_tabs_json, include_positions,
+                total_count, started_at, status, params_json
+            )
+            VALUES (?, ?, '[]', 1, ?, ?, 'RUNNING', ?)
+            """,
+            (
+                run_id,
+                trade_date,
+                len(positions),
+                started_at,
+                json.dumps({"mode": "SNAPSHOT_PREPARE", "source": "daily_market_snapshots"}, ensure_ascii=False),
+            ),
+        )
+        ok_symbols: list[str] = []
+        missing_symbols: list[str] = []
+        for index, position in enumerate(positions, start=1):
+            symbol = position["symbol"]
+            snapshot = conn.execute(
+                """
+                SELECT *
+                FROM daily_market_snapshots
+                WHERE symbol=? AND trade_date=?
+                """,
+                (symbol, trade_date),
+            ).fetchone()
+            status = "OK" if snapshot and snapshot["close"] is not None else "FAILED"
+            error = None if status == "OK" else f"缺少 {trade_date} 日终快照"
+            if status == "OK":
+                ok_symbols.append(symbol)
+                _copy_daily_snapshot_to_market_quote(conn, dict(snapshot))
+            else:
+                missing_symbols.append(symbol)
+            conn.execute(
+                """
+                INSERT INTO post_market_data_prep_items (
+                    item_id, run_id, symbol, name, source_type, status,
+                    trade_date, error_message, created_at, payload_json
+                )
+                VALUES (?, ?, ?, ?, 'POSITION', ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"{run_id}_item_{index:04d}_{symbol}",
+                    run_id,
+                    symbol,
+                    position.get("name"),
+                    status,
+                    trade_date,
+                    error,
+                    now_iso(),
+                    json_text({"mode": "SNAPSHOT_PREPARE", "symbol": symbol, "trade_date": trade_date, "error": error}),
+                ),
+            )
+        valuation_sync = sync_position_valuations(conn, ok_symbols)
+        status = "OK" if not missing_symbols else "PARTIAL" if ok_symbols else "FAILED"
+        conn.execute(
+            """
+            UPDATE post_market_data_prep_runs
+            SET success_count=?, failed_count=?, position_sync_count=?,
+                account_sync_count=?, finished_at=?, status=?, error_message=?,
+                payload_json=?
+            WHERE run_id=?
+            """,
+            (
+                len(ok_symbols),
+                len(missing_symbols),
+                (valuation_sync or {}).get("positions") or 0,
+                (valuation_sync or {}).get("accounts") or 0,
+                now_iso(),
+                status,
+                None if not missing_symbols else f"缺少 {len(missing_symbols)} 只持仓日终快照",
+                json_text(
+                    {
+                        "mode": "SNAPSHOT_PREPARE",
+                        "trade_date": trade_date,
+                        "ok_symbols": ok_symbols,
+                        "missing_symbols": missing_symbols,
+                        "valuation_sync": valuation_sync,
+                    }
+                ),
+                run_id,
+            ),
+        )
+        conn.commit()
+    return {
+        "run_id": run_id,
+        "trade_date": trade_date,
+        "total": len(positions),
+        "success_count": len(ok_symbols),
+        "failed_count": len(missing_symbols),
+        "valuation_sync": valuation_sync,
+    }
+
+
+def _copy_daily_snapshot_to_market_quote(conn, snapshot: dict[str, Any]) -> None:
+    now = now_iso()
+    conn.execute(
+        """
+        INSERT INTO market_quotes (
+            symbol, name, exchange, asset_type, trade_date, quote_time, price,
+            pct_change, pe_ttm, pb, market_cap_yuan, ma20, ma60,
+            change_20d_pct, source, source_path, updated_at, payload_json
+        )
+        VALUES (?, ?, ?, COALESCE(?, 'stock'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET
+            name=COALESCE(excluded.name, market_quotes.name),
+            exchange=COALESCE(excluded.exchange, market_quotes.exchange),
+            asset_type=excluded.asset_type,
+            trade_date=excluded.trade_date,
+            quote_time=excluded.quote_time,
+            price=excluded.price,
+            pct_change=excluded.pct_change,
+            pe_ttm=excluded.pe_ttm,
+            pb=excluded.pb,
+            market_cap_yuan=excluded.market_cap_yuan,
+            ma20=excluded.ma20,
+            ma60=excluded.ma60,
+            change_20d_pct=excluded.change_20d_pct,
+            source=excluded.source,
+            source_path=excluded.source_path,
+            updated_at=excluded.updated_at,
+            payload_json=excluded.payload_json
+        """,
+        (
+            snapshot.get("symbol"),
+            snapshot.get("name"),
+            snapshot.get("exchange"),
+            snapshot.get("asset_type") or "stock",
+            snapshot.get("trade_date"),
+            snapshot.get("observed_at"),
+            snapshot.get("close"),
+            snapshot.get("pct_change"),
+            snapshot.get("pe_ttm"),
+            snapshot.get("pb"),
+            snapshot.get("market_cap_yuan"),
+            snapshot.get("ma20"),
+            snapshot.get("ma60"),
+            snapshot.get("change_20d_pct"),
+            "daily_market_snapshots",
+            snapshot.get("batch_id"),
+            now,
+            snapshot.get("payload_json"),
+        ),
+    )
+
+
+def read_full_market_codes(settings: DashboardSettings) -> list[dict[str, str]]:
+    path = settings.output_root / "沪深A股代码（不含创业板）.csv"
+    if not path.exists():
+        raise ValueError(f"股票代码文件不存在：{path}")
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            symbol = "".join(ch for ch in str(row.get("股票代码") or "").strip() if ch.isdigit())[:6]
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "name": str(row.get("股票名称") or "").strip(),
+                    "exchange": str(row.get("交易所") or "").strip(),
+                    "board": str(row.get("板块") or "").strip(),
+                }
+            )
+    if not rows:
+        raise ValueError(f"股票代码文件为空：{path}")
+    return rows
+
+
+def create_full_market_data_collection(settings: DashboardSettings, *, limit: int | None = None) -> dict[str, Any]:
+    stocks = read_full_market_codes(settings)
+    if limit is not None and limit > 0:
+        stocks = stocks[:limit]
+    started_at = now_iso()
+    batch_id = f"marketfull_{compact_now()}"
+    with connect(settings.db_path) as conn:
+        running = conn.execute(
+            """
+            SELECT batch_id, total_count
+            FROM market_data_batches
+            WHERE batch_type='POST_MARKET_FULL' AND status='RUNNING'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if running:
+            return {"batch_id": running["batch_id"], "total": running["total_count"], "already_running": True}
+        create_market_data_batch(
+            conn,
+            batch_id=batch_id,
+            batch_type="POST_MARKET_FULL",
+            session_type="POST_MARKET",
+            scope_type="FULL_MARKET",
+            scope={"source_file": "data/沪深A股代码（不含创业板）.csv", "count": len(stocks)},
+            total_count=len(stocks),
+            source="full_market_post_market_collect",
+            params={"period": "middle", "limit": limit},
+            started_at=started_at,
+        )
+        for index, stock in enumerate(stocks, start=1):
+            conn.execute(
+                """
+                INSERT INTO market_data_batch_items (
+                    item_id, batch_id, symbol, name, exchange, status
+                )
+                VALUES (?, ?, ?, ?, ?, 'PENDING')
+                """,
+                (
+                    f"{batch_id}_item_{index:05d}_{stock['symbol']}",
+                    batch_id,
+                    stock["symbol"],
+                    stock.get("name"),
+                    stock.get("exchange"),
+                ),
+            )
+        conn.commit()
+    return {"batch_id": batch_id, "total": len(stocks)}
+
+
+def run_full_market_data_collection(settings: DashboardSettings, batch_id: str) -> dict[str, Any]:
+    with connect(settings.db_path) as conn:
+        items = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT item_id, symbol, name
+                FROM market_data_batch_items
+                WHERE batch_id=? AND status IN ('PENDING', 'RUNNING')
+                ORDER BY item_id
+                """,
+                (batch_id,),
+            ).fetchall()
+        ]
+    rows: list[dict[str, Any]] = []
+    success_count = 0
+    failed_count = 0
+    latest_trade_date: str | None = None
+    try:
+        for item in items:
+            symbol = item["symbol"]
+            item_started_at = now_iso()
+            with connect(settings.db_path) as conn:
+                conn.execute(
+                    """
+                    UPDATE market_data_batch_items
+                    SET status='RUNNING', started_at=?
+                    WHERE item_id=?
+                    """,
+                    (item_started_at, item["item_id"]),
+                )
+                conn.commit()
+            try:
+                payload = build_payload(symbol, "middle")
+                quote = payload.get("quote") or {}
+                with connect(settings.db_path) as conn:
+                    upsert_market_quote(conn, symbol, payload, source_path="full_market_post_market_collect")
+                    upsert_daily_market_snapshot(
+                        conn,
+                        symbol,
+                        payload,
+                        batch_id=batch_id,
+                        data_origin="LIVE_CAPTURE",
+                        source_version="stock_decision_data.middle",
+                    )
+                    conn.execute(
+                        """
+                        UPDATE market_data_batch_items
+                        SET status='OK', name=COALESCE(?, name), trade_date=?,
+                            finished_at=?, error_message=NULL, payload_json=?
+                        WHERE item_id=?
+                        """,
+                        (
+                            quote.get("name"),
+                            quote.get("trade_date"),
+                            now_iso(),
+                            json_text(
+                                {
+                                    "symbol": symbol,
+                                    "name": quote.get("name"),
+                                    "trade_date": quote.get("trade_date"),
+                                }
+                            ),
+                            item["item_id"],
+                        ),
+                    )
+                    success_count += 1
+                    latest_trade_date = max(latest_trade_date or "", str(quote.get("trade_date") or "")) or latest_trade_date
+                    _update_market_batch_progress(conn, batch_id, latest_trade_date)
+                    conn.commit()
+                rows.append({"code": symbol, "status": "OK", "trade_date": quote.get("trade_date")})
+            except Exception as exc:  # noqa: BLE001 - keep collection moving.
+                failed_count += 1
+                with connect(settings.db_path) as conn:
+                    conn.execute(
+                        """
+                        UPDATE market_data_batch_items
+                        SET status='FAILED', finished_at=?, error_message=?
+                        WHERE item_id=?
+                        """,
+                        (now_iso(), str(exc), item["item_id"]),
+                    )
+                    _update_market_batch_progress(conn, batch_id, latest_trade_date)
+                    conn.commit()
+                rows.append({"code": symbol, "status": "FAILED", "error": str(exc)})
+        with connect(settings.db_path) as conn:
+            status = "OK" if failed_count == 0 else "PARTIAL" if success_count > 0 else "FAILED"
+            finish_market_data_batch(
+                conn,
+                batch_id=batch_id,
+                trade_date=latest_trade_date,
+                status=status,
+                success_count=success_count,
+                failed_count=failed_count,
+                payload={"rows_sample": rows[:100], "row_count": len(rows)},
+            )
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - mark whole batch failed.
+        with connect(settings.db_path) as conn:
+            fail_market_data_batch(conn, batch_id=batch_id, error_message=str(exc))
+            conn.commit()
+        raise
+    return {"batch_id": batch_id, "success_count": success_count, "failed_count": failed_count}
+
+
+def _update_market_batch_progress(conn, batch_id: str, trade_date: str | None) -> None:
+    row = conn.execute(
+        """
+        SELECT
+            SUM(CASE WHEN status='OK' THEN 1 ELSE 0 END) AS ok_count,
+            SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) AS failed_count
+        FROM market_data_batch_items
+        WHERE batch_id=?
+        """,
+        (batch_id,),
+    ).fetchone()
+    conn.execute(
+        """
+        UPDATE market_data_batches
+        SET trade_date=COALESCE(?, trade_date),
+            success_count=?,
+            failed_count=?
+        WHERE batch_id=?
+        """,
+        (
+            trade_date,
+            int(row["ok_count"] or 0),
+            int(row["failed_count"] or 0),
+            batch_id,
+        ),
+    )
+
+
+def create_post_market_close_workflow(settings: DashboardSettings, *, limit: int | None = None) -> dict[str, Any]:
+    run_id = f"close_{compact_now()}"
+    started_at = now_iso()
+    with connect(settings.db_path) as conn:
+        running = conn.execute(
+            """
+            SELECT run_id
+            FROM post_market_close_runs
+            WHERE status='RUNNING'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        if running:
+            return {"run_id": running["run_id"], "already_running": True}
+        conn.execute(
+            """
+            INSERT INTO post_market_close_runs (
+                run_id, started_at, status, current_step,
+                full_market_status, prepare_status, diagnosis_status, watchlist_status,
+                params_json
+            )
+            VALUES (?, ?, 'RUNNING', 'FULL_MARKET', 'PENDING', 'PENDING', 'PENDING', 'PENDING', ?)
+            """,
+            (run_id, started_at, json.dumps({"limit": limit}, ensure_ascii=False)),
+        )
+        conn.commit()
+    return {"run_id": run_id, "already_running": False}
+
+
+def run_post_market_close_workflow(settings: DashboardSettings, run_id: str, *, limit: int | None = None) -> dict[str, Any]:
+    try:
+        _update_close_run(settings, run_id, current_step="FULL_MARKET", full_market_status="RUNNING")
+        market = create_full_market_data_collection(settings, limit=limit)
+        market_batch_id = market["batch_id"]
+        _update_close_run(settings, run_id, market_batch_id=market_batch_id, total_count=market.get("total") or 0)
+        if market.get("already_running"):
+            _wait_market_batch(settings, market_batch_id)
+        else:
+            run_full_market_data_collection(settings, market_batch_id)
+        market_status = _market_batch_status(settings, market_batch_id)
+        _update_close_run(
+            settings,
+            run_id,
+            full_market_status=market_status.get("status") or "OK",
+            success_count=market_status.get("success_count") or 0,
+            failed_count=market_status.get("failed_count") or 0,
+        )
+
+        _update_close_run(settings, run_id, current_step="PREPARE", prepare_status="RUNNING")
+        prepared = run_post_market_snapshot_prepare(settings)
+        _update_close_run(settings, run_id, prepare_status="OK", prepare_run_id=prepared.get("run_id"))
+
+        _update_close_run(settings, run_id, current_step="DIAGNOSIS", diagnosis_status="RUNNING")
+        diagnosis = run_post_market_diagnosis(settings, tab_ids=["all", "decisions"], include_positions=True)
+        _update_close_run(
+            settings,
+            run_id,
+            diagnosis_status="OK",
+            diagnosis_run_id=diagnosis.get("run_id"),
+            next_watch_count=diagnosis.get("next_watch_count") or 0,
+        )
+
+        _update_close_run(settings, run_id, current_step="WATCHLIST", watchlist_status="RUNNING")
+        synced = sync_next_day_watch_tab(settings, diagnosis.get("run_id"))
+        _update_close_run(
+            settings,
+            run_id,
+            status="OK",
+            current_step="DONE",
+            watchlist_status="OK",
+            finished_at=now_iso(),
+            payload={"market": market_status, "prepared": prepared, "diagnosis": diagnosis, "watchlist": synced},
+        )
+        return {"run_id": run_id, "status": "OK"}
+    except Exception as exc:  # noqa: BLE001 - persist failure for UI.
+        _update_close_run(settings, run_id, status="FAILED", finished_at=now_iso(), error_message=str(exc))
+        raise
+
+
+def sync_next_day_watch_tab(settings: DashboardSettings, run_id: str | None = None) -> dict[str, Any]:
+    with connect(settings.db_path) as conn:
+        ensure_default_tabs(conn)
+        if not run_id:
+            row = conn.execute(
+                "SELECT run_id FROM next_day_watch_items ORDER BY COALESCE(created_at, '') DESC LIMIT 1"
+            ).fetchone()
+            run_id = row["run_id"] if row else None
+        conn.execute("DELETE FROM watchlist_items WHERE tab_id='next_day_watch'")
+        if not run_id:
+            conn.commit()
+            return {"run_id": None, "synced": 0}
+        rows = conn.execute(
+            """
+            SELECT symbol, COALESCE(name, symbol) AS name
+            FROM next_day_watch_items
+            WHERE run_id=? AND review_status NOT IN ('IGNORE')
+            ORDER BY CASE priority WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 9 END,
+                     symbol
+            """,
+            (run_id,),
+        ).fetchall()
+        count = 0
+        for row in rows:
+            count += upsert_watchlist_item(conn, "next_day_watch", row["symbol"], row["name"])
+            count += upsert_watchlist_item(conn, "all", row["symbol"], row["name"])
+        conn.commit()
+    return {"run_id": run_id, "synced": count}
+
+
+def _update_close_run(settings: DashboardSettings, run_id: str, **fields: Any) -> None:
+    allowed = {
+        "finished_at",
+        "status",
+        "current_step",
+        "full_market_status",
+        "prepare_status",
+        "diagnosis_status",
+        "watchlist_status",
+        "market_batch_id",
+        "prepare_run_id",
+        "diagnosis_run_id",
+        "total_count",
+        "success_count",
+        "failed_count",
+        "next_watch_count",
+        "error_message",
+    }
+    payload = fields.pop("payload", None)
+    assignments: list[str] = []
+    values: list[Any] = []
+    for key, value in fields.items():
+        if key in allowed:
+            assignments.append(f"{key}=?")
+            values.append(value)
+    if payload is not None:
+        assignments.append("payload_json=?")
+        values.append(json_text(payload))
+    if not assignments:
+        return
+    values.append(run_id)
+    with connect(settings.db_path) as conn:
+        conn.execute(f"UPDATE post_market_close_runs SET {', '.join(assignments)} WHERE run_id=?", tuple(values))
+        conn.commit()
+
+
+def _market_batch_status(settings: DashboardSettings, batch_id: str) -> dict[str, Any]:
+    with connect(settings.db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT batch_id, status, total_count, success_count, failed_count, trade_date
+            FROM market_data_batches
+            WHERE batch_id=?
+            """,
+            (batch_id,),
+        ).fetchone()
+    return dict(row) if row else {}
+
+
+def _wait_market_batch(settings: DashboardSettings, batch_id: str) -> None:
+    while True:
+        status = _market_batch_status(settings, batch_id).get("status")
+        if status != "RUNNING":
+            return
+        time.sleep(5)
 
 
 def run_post_market_diagnosis(
@@ -476,12 +1063,17 @@ def run_post_market_diagnosis(
             row["symbol"]: dict(row)
             for row in conn.execute(
                 f"""
-                SELECT symbol, name, trade_date, price, pct_change, pe_ttm, pb,
+                SELECT symbol, name, trade_date, close AS price, pct_change, pe_ttm, pb,
                        ma20, ma60, change_20d_pct
-                FROM market_quotes
+                FROM daily_market_snapshots
                 WHERE symbol IN ({",".join("?" for _ in codes) if codes else "''"})
+                  AND trade_date = (
+                      SELECT MAX(trade_date)
+                      FROM daily_market_snapshots
+                      WHERE symbol IN ({",".join("?" for _ in codes) if codes else "''"})
+                  )
                 """,
-                tuple(codes),
+                tuple(codes + codes),
             ).fetchall()
         } if codes else {}
         position_by_symbol = {
@@ -933,7 +1525,6 @@ def generate_watchlist_screen(settings: DashboardSettings, tab_id: str, codes: l
         conn.commit()
     return result
 
-
 def update_screen_result_review(
     settings: DashboardSettings,
     result_id: str,
@@ -974,11 +1565,6 @@ def _generate_decision_for_symbol(
         payload = build_payload(symbol, "middle")
         upsert_market_quote(conn, symbol, payload, source_path=source)
         sync_position_valuations(conn, [symbol])
-        stock_dir = output_root / "stock_json"
-        stock_dir.mkdir(parents=True, exist_ok=True)
-        stock_path = stock_dir / f"stock_data_{symbol}.json"
-        stock_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
         position = conn.execute(
             """
             SELECT account_id, avg_cost, position_pct, total_quantity, available_quantity,
@@ -990,6 +1576,7 @@ def _generate_decision_for_symbol(
             """,
             (symbol,),
         ).fetchone()
+        strategy_context = get_strategy_context(conn, symbol) or {}
         account_state = None
         if position is not None:
             account_state = conn.execute(
@@ -1012,44 +1599,187 @@ def _generate_decision_for_symbol(
         if position is not None and position["stop_loss_price"] not in (None, "")
         else technical.get("low_20d")
     )
-    args = SimpleNamespace(
-        data_dir=str(stock_dir),
-        output_dir=str(output_root),
-        trade_date=(payload.get("quote") or {}).get("trade_date"),
-        report=True,
-        keep_outputs=5,
-        avg_cost=position["avg_cost"] if position is not None else None,
-        position_pct=position["position_pct"] if position is not None else None,
-        total_quantity=position["total_quantity"] if position is not None else None,
-        available_quantity=position["available_quantity"] if position is not None else None,
-        buy_logic=(
+    user_context = {
+        "avg_cost": position["avg_cost"] if position is not None else None,
+        "position_pct": position["position_pct"] if position is not None else None,
+        "total_quantity": position["total_quantity"] if position is not None else None,
+        "available_quantity": position["available_quantity"] if position is not None else None,
+        "buy_logic": (
             position["buy_logic"]
             if position is not None and position["buy_logic"] not in (None, "")
             else "真实持仓导入，原买入逻辑未记录" if position is not None else None
         ),
-        invalidation_point=fallback_invalidation if position is not None else None,
-        holding_period="middle",
-        available_cash=account_state["available_cash"] if account_state is not None else None,
-        total_assets=account_state["total_assets"] if account_state is not None else None,
-        cash_reserve_pct=account_state["cash_pct"] if account_state is not None else None,
+        "invalidation_point": fallback_invalidation if position is not None else None,
+        "holding_period": strategy_context.get("holding_period") or "middle",
+        "available_cash": account_state["available_cash"] if account_state is not None else None,
+        "total_assets": account_state["total_assets"] if account_state is not None else None,
+        "cash_reserve_pct": account_state["cash_pct"] if account_state is not None else None,
+        "core_logic": strategy_context.get("core_logic") or (
+            position["buy_logic"] if position is not None else None
+        ),
+        "technical_invalidation": strategy_context.get("technical_invalidation") or (
+            fallback_invalidation if position is not None else None
+        ),
+    }
+    user_context.update(
+        {
+            field: strategy_context[field]
+            for field in CONTEXT_FIELDS
+            if strategy_context.get(field) is not None
+        }
     )
-    if position is None:
-        result = build_decision(symbol, "buy", args)
-        decision = result["decision"]
-    else:
-        result = _build_combined_position_decision(symbol, payload, stock_path, args, output_root)
-        decision = result["decision"]
+    decision_now = datetime.now(_tzinfo())
+    trade_date = (payload.get("quote") or {}).get("trade_date")
+    registry = build_builtin_registry(
+        ai_provider=provider_from_name(settings.ai_provider, model=settings.ai_model),
+        # Let the CLI provider enforce and clean up its 120s subprocess timeout
+        # before the strategy-level fallback returns BLOCKED.
+        ai_timeout_seconds=settings.ai_timeout_seconds + 10,
+    )
+    pipeline = StrategyPipeline(registry)
+
+    buy_time = build_time_context(
+        payload,
+        TaskType.BUY.value,
+        now=decision_now,
+        trade_date_override=trade_date,
+    )
+    buy_snapshot = build_analysis_snapshot(
+        payload,
+        buy_time,
+        TaskType.BUY,
+        user_context=user_context,
+        source_file=None,
+    )
+    buy_result = pipeline.run(buy_snapshot)
+
+    holding_result: PipelineResult | None = None
+    if position is not None:
+        holding_time = build_time_context(
+            payload,
+            TaskType.HOLDING.value,
+            now=decision_now,
+            trade_date_override=trade_date,
+        )
+        holding_snapshot = build_analysis_snapshot(
+            payload,
+            holding_time,
+            TaskType.HOLDING,
+            user_context=user_context,
+            source_file=None,
+        )
+        holding_result = pipeline.run(holding_snapshot)
+
+    stamp = decision_now.strftime("%Y%m%dT%H%M%S%f")
+    analysis_id = f"sas_{symbol}_{stamp}"
+    result_path = output_root / "strategy_platform" / "runs" / f"strategy_analysis_{symbol}_{stamp}.json"
+    report_path = output_root / "reports" / f"strategy_report_{symbol}_{stamp}.md"
+    ensure_dir(result_path.parent)
+    payload_json = {
+        "schema_version": "strategy_analysis_session.v0.2",
+        "analysis_id": analysis_id,
+        "symbol": buy_snapshot.symbol,
+        "name": buy_snapshot.name,
+        "trade_date": buy_snapshot.trade_date,
+        "decision_time": buy_snapshot.decision_time,
+        "source": source,
+        "has_position": position is not None,
+        "buy": buy_result.to_dict(),
+        "holding": holding_result.to_dict() if holding_result is not None else None,
+    }
+    result_path.write_text(json.dumps(payload_json, ensure_ascii=False, indent=2), encoding="utf-8")
+    write_analysis_session_report(report_path, buy_result, holding_result)
+
+    all_results = [buy_result] + ([holding_result] if holding_result is not None else [])
+    all_aggregations = [item.aggregation for item in all_results]
+    all_runs = [item.run for item in all_results]
+    session = {
+        "analysis_id": analysis_id,
+        "symbol": buy_snapshot.symbol,
+        "name": buy_snapshot.name,
+        "trade_date": buy_snapshot.trade_date,
+        "decision_time": buy_snapshot.decision_time,
+        "source": source,
+        "has_position": position is not None,
+        "buy_snapshot_id": buy_result.snapshot.snapshot_id,
+        "buy_run_id": buy_result.run.run_id,
+        "buy_aggregation_id": buy_result.aggregation.aggregation_id,
+        "buy_conclusion": buy_result.aggregation.conclusion.value,
+        "holding_snapshot_id": holding_result.snapshot.snapshot_id if holding_result else None,
+        "holding_run_id": holding_result.run.run_id if holding_result else None,
+        "holding_aggregation_id": holding_result.aggregation.aggregation_id if holding_result else None,
+        "holding_conclusion": holding_result.aggregation.conclusion.value if holding_result else None,
+        "effective_strategy_count": sum(item.effective_strategy_count for item in all_aggregations),
+        "blocked_strategy_count": sum(len(item.blocked_strategies) for item in all_aggregations),
+        "failed_strategy_count": sum(len(item.failed_strategies) for item in all_aggregations),
+        "status": _session_status([item.status.value for item in all_runs]),
+        "report_relative_path": relative_path(output_root, report_path),
+        "payload": payload_json,
+    }
     with connect(settings.db_path) as conn:
-        upsert_watchlist_item(conn, "decisions", symbol, name or (payload.get("quote") or {}).get("name"))
+        save_pipeline_result(conn, buy_result)
+        if holding_result is not None:
+            save_pipeline_result(conn, holding_result)
+        save_analysis_session(conn, session)
+        write_report(
+            conn,
+            output_root,
+            report_path,
+            report_type="strategy_platform",
+            title=f"多策略综合技术报告 {buy_snapshot.symbol} {buy_snapshot.name or ''}".rstrip(),
+            symbol=buy_snapshot.symbol,
+            trade_date=buy_snapshot.trade_date,
+            strategy_version="strategy_platform.v0.2",
+            source_type="strategy_analysis_session",
+            source_id=analysis_id,
+            metadata={"result_path": relative_path(output_root, result_path)},
+        )
+        upsert_watchlist_item(conn, "decisions", symbol, name or buy_snapshot.name)
         conn.commit()
     return {
         "symbol": symbol,
-        "task": "position_combined" if position is not None else "buy",
-        "decision_id": decision.get("decision_id"),
-        "final_action": decision.get("final_action"),
-        "decision_path": result.get("decision_path"),
-        "report_path": result.get("report_path"),
+        "task": "position_multi_strategy" if position is not None else "buy_multi_strategy",
+        "decision_id": analysis_id,
+        "final_action": _session_action_code(buy_result, holding_result),
+        "decision_path": str(result_path),
+        "report_path": str(report_path),
     }
+
+
+def generate_strategy_analysis(settings: DashboardSettings, symbol: str) -> dict[str, Any]:
+    normalized = symbol.strip()
+    if len(normalized) != 6 or not normalized.isdigit():
+        raise ValueError("股票代码必须是 6 位数字")
+    return _generate_decision_for_symbol(settings, normalized, source="decisions_page_refresh")
+
+
+def save_strategy_context_profile(
+    settings: DashboardSettings,
+    symbol: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    with connect(settings.db_path) as conn:
+        result = save_strategy_context(conn, symbol, values, source="WEB")
+        conn.commit()
+    return result
+
+
+def _session_status(statuses: list[str]) -> str:
+    if statuses and all(item == "FAILED" for item in statuses):
+        return "FAILED"
+    if any(item in {"FAILED", "PARTIAL"} for item in statuses):
+        return "PARTIAL"
+    return "COMPLETED"
+
+
+def _session_action_code(
+    buy_result: PipelineResult,
+    holding_result: PipelineResult | None,
+) -> str:
+    buy = buy_result.aggregation.conclusion.value
+    if holding_result is None:
+        return f"BUY:{buy}"
+    return f"HOLDING:{holding_result.aggregation.conclusion.value}|BUY:{buy}"
 
 
 def generate_decision_from_screen_result(settings: DashboardSettings, result_id: str) -> dict[str, Any]:
@@ -1139,157 +1869,3 @@ def generate_decision_from_position_check(settings: DashboardSettings, check_id:
         )
         conn.commit()
     return result
-
-
-def _build_combined_position_decision(
-    symbol: str,
-    raw_data: dict[str, Any],
-    source_path: Path,
-    args: SimpleNamespace,
-    output_root: Path,
-) -> dict[str, Any]:
-    user_context = {
-        "avg_cost": args.avg_cost,
-        "position_pct": args.position_pct,
-        "total_quantity": args.total_quantity,
-        "available_quantity": args.available_quantity,
-        "buy_logic": args.buy_logic,
-        "invalidation_point": args.invalidation_point,
-        "holding_period": args.holding_period,
-        "available_cash": args.available_cash,
-        "total_assets": args.total_assets,
-        "cash_reserve_pct": args.cash_reserve_pct,
-    }
-    holding_time = build_time_context(raw_data, HOLDING_REVIEW, trade_date_override=args.trade_date)
-    buy_time = build_time_context(raw_data, BUY_EVALUATION, trade_date_override=args.trade_date)
-    holding_snapshot = build_strategy_snapshot(raw_data, holding_time, HOLDING_REVIEW, user_context=user_context, source_file=str(source_path))
-    buy_snapshot = build_strategy_snapshot(raw_data, buy_time, BUY_EVALUATION, user_context=user_context, source_file=str(source_path))
-    holding_decision = run_strategy(holding_snapshot)
-    buy_decision = run_strategy(buy_snapshot)
-    stamp = now_stamp(__import__("datetime").datetime.fromisoformat(holding_snapshot["decision_time"]))
-    snapshot_id = f"ss_{symbol}_position_combined_review_{stamp}"
-    decision_id = f"dr_{symbol}_position_combined_review_{stamp}"
-    snapshot = {
-        "snapshot_id": snapshot_id,
-        "schema_version": "strategy_snapshot.combined.v0.1",
-        "symbol": holding_snapshot.get("symbol"),
-        "name": holding_snapshot.get("name"),
-        "task_type": "POSITION_COMBINED_REVIEW",
-        "trade_date": holding_snapshot.get("trade_date") or holding_time.get("trade_date"),
-        "decision_time": holding_snapshot.get("decision_time"),
-        "strategy_version": holding_snapshot.get("strategy_version"),
-        "data_quality": holding_snapshot.get("data_quality") or {},
-        "time_context": holding_snapshot.get("time_context") or holding_time,
-        "quote": holding_snapshot.get("quote") or {},
-        "position": holding_snapshot.get("position") or {},
-        "cash": holding_snapshot.get("cash") or {},
-        "source_file": str(source_path),
-        "holding_snapshot": holding_snapshot,
-        "buy_snapshot": buy_snapshot,
-    }
-    decision = {
-        "decision_id": decision_id,
-        "snapshot_id": snapshot_id,
-        "schema_version": "decision_result.combined.v0.1",
-        "symbol": holding_decision.get("symbol"),
-        "name": holding_decision.get("name"),
-        "task_type": "POSITION_COMBINED_REVIEW",
-        "decision_time": holding_decision.get("decision_time"),
-        "time_context": holding_decision.get("time_context") or {},
-        "final_action": _combined_final_action(holding_decision, buy_decision),
-        "confidence": _combined_confidence(holding_decision, buy_decision),
-        "action_reason": _combined_reason(holding_decision, buy_decision),
-        "human_review_required": True,
-        "trigger_prices": holding_decision.get("trigger_prices") or {},
-        "position_plan": holding_decision.get("position_plan") or {},
-        "invalidation_points": holding_decision.get("invalidation_points") or {},
-        "data_quality_summary": holding_decision.get("data_quality_summary") or {},
-        "execution_constraints": holding_decision.get("execution_constraints") or {},
-        "rule_results": [],
-        "blocking_rules": [],
-        "warning_rules": [],
-        "holding_review": holding_decision,
-        "buy_evaluation": buy_decision,
-    }
-    task_slug = "position_combined_review"
-    snapshot_path = output_root / "strategy_snapshots" / f"strategy_snapshot_{symbol}_{task_slug}_{stamp}.json"
-    decision_path = output_root / "decision_results" / f"decision_result_{symbol}_{task_slug}_{stamp}.json"
-    report_path = output_root / "reports" / f"decision_report_{symbol}_{task_slug}_{stamp}.md"
-    _write_json(snapshot_path, snapshot)
-    _write_json(decision_path, decision)
-    _write_combined_report(report_path, decision)
-    mirror_record(output_root, "strategy_snapshot", snapshot, source_path=snapshot_path)
-    mirror_record(output_root, "decision_result", decision, source_path=decision_path)
-    mirror_report(
-        output_root,
-        report_path,
-        report_type="decision",
-        symbol=decision.get("symbol"),
-        trade_date=(decision.get("time_context") or {}).get("trade_date"),
-        strategy_version=decision.get("strategy_version"),
-        source_type="decision_result",
-        source_id=decision.get("decision_id"),
-    )
-    return {
-        "snapshot_path": str(snapshot_path),
-        "decision_path": str(decision_path),
-        "report_path": str(report_path),
-        "decision": decision,
-    }
-
-
-def _write_json(path: Path, data: dict[str, Any]) -> None:
-    ensure_dir(path.parent)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def _combined_final_action(holding: dict[str, Any], buy: dict[str, Any]) -> str:
-    return f"HOLDING:{holding.get('final_action')}|BUY:{buy.get('final_action')}"
-
-
-def _combined_confidence(holding: dict[str, Any], buy: dict[str, Any]) -> str:
-    order = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
-    holding_conf = holding.get("confidence") or "LOW"
-    buy_conf = buy.get("confidence") or "LOW"
-    return holding_conf if order.get(holding_conf, 0) <= order.get(buy_conf, 0) else buy_conf
-
-
-def _combined_reason(holding: dict[str, Any], buy: dict[str, Any]) -> str:
-    return f"持仓判断：{holding.get('final_action')}；买入/加仓判断：{buy.get('final_action')}"
-
-
-def _write_combined_report(path: Path, decision: dict[str, Any]) -> None:
-    ensure_dir(path.parent)
-    holding = decision.get("holding_review") or {}
-    buy = decision.get("buy_evaluation") or {}
-    lines = [
-        f"# 合并决策报告 {decision.get('symbol')} {decision.get('name')}",
-        "",
-        "## 合并结论",
-        f"- 持仓卖出/继续持有：`{holding.get('final_action')}`",
-        f"- 买入/加仓评估：`{buy.get('final_action')}`",
-        f"- 合并动作：`{decision.get('final_action')}`",
-        f"- 决策时间：{decision.get('decision_time')}",
-        "",
-        "## 持仓侧说明",
-        f"- 信心：{holding.get('confidence')}",
-        f"- 原因：{holding.get('action_reason')}",
-        "",
-        "## 买入/加仓侧说明",
-        f"- 信心：{buy.get('confidence')}",
-        f"- 原因：{buy.get('action_reason')}",
-        "",
-        "## 关键价位",
-    ]
-    triggers = holding.get("trigger_prices") or {}
-    for key, value in triggers.items():
-        lines.append(f"- {key}: {value}")
-    lines.extend(
-        [
-            "",
-            "## 使用提示",
-            "- 这是持仓股的合并决策，一条记录同时保存卖出/持有判断和买入/加仓判断。",
-            "- 不构成投资建议，执行前仍需人工确认仓位、价格、T+1 可卖数量和风险。",
-        ]
-    )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")

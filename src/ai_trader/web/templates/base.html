@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}天才交易员{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}?v=20260707-post-market-data">
+  <link rel="stylesheet" href="{{ url_for('static', path='/css/app.css') }}?v=20260718-strategy-context">
 </head>
 <body>
   <div class="app-shell">
@@ -21,9 +21,11 @@
         <a class="nav-link {{ 'active' if active == 'accounts' else '' }}" href="{{ url_for('accounts_page') }}">账户</a>
         <a class="nav-link {{ 'active' if active == 'positions' else '' }}" href="{{ url_for('positions_page') }}">持仓</a>
         <a class="nav-link {{ 'active' if active == 'decisions' else '' }}" href="{{ url_for('decisions_page') }}">决策</a>
+        <a class="nav-link {{ 'active' if active == 'strategies' else '' }}" href="{{ url_for('strategies_page') }}">策略库</a>
         <a class="nav-link {{ 'active' if active == 'plans' else '' }}" href="{{ url_for('plans_page') }}">风控与组合</a>
         <a class="nav-link {{ 'active' if active == 'workflows' else '' }}" href="{{ url_for('workflows_page') }}">工作流</a>
         <a class="nav-link {{ 'active' if active == 'post_market_data' else '' }}" href="{{ url_for('post_market_data_prep_page') }}">盘后数据</a>
+        <a class="nav-link {{ 'active' if active == 'historical_data' else '' }}" href="{{ url_for('historical_data_page') }}">历史数据</a>
         <a class="nav-link {{ 'active' if active == 'post_market_diagnosis' else '' }}" href="{{ url_for('post_market_diagnosis_page') }}">盘后诊股</a>
         <a class="nav-link {{ 'active' if active == 'replays' else '' }}" href="{{ url_for('replays_page') }}">历史回放</a>
         <a class="nav-link {{ 'active' if active == 'strategy_iterations' else '' }}" href="{{ url_for('strategy_iterations_page') }}">策略迭代</a>

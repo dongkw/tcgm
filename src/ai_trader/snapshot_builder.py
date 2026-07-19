@@ -121,6 +121,10 @@ def build_strategy_snapshot(
     cash = _build_cash(user_context)
     data_quality = _quality_result(raw_data, task_type, position)
     data_quality["time_warnings"] = list(time_context.get("time_warnings") or [])
+    time_blocks = list(time_context.get("blocked_data_reasons") or [])
+    data_quality["blocking_time_reasons"] = time_blocks
+    if time_blocks:
+        data_quality["level"] = "BLOCKED"
 
     symbol = get_in(raw_data, "quote.code")
     decision_dt = datetime.fromisoformat(time_context["decision_time"])

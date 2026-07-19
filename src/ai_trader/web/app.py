@@ -39,12 +39,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db-path")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--ai-provider", default=None, choices=["codex-cli", "disabled"])
+    parser.add_argument("--ai-model", default=None)
+    parser.add_argument("--ai-timeout", type=float, default=None)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    settings = build_settings(args.output_dir, args.db_path, args.host, args.port)
+    settings = build_settings(
+        args.output_dir,
+        args.db_path,
+        args.host,
+        args.port,
+        ai_provider=args.ai_provider,
+        ai_model=args.ai_model,
+        ai_timeout_seconds=args.ai_timeout,
+    )
     app = create_app(settings)
     uvicorn.run(app, host=settings.host, port=settings.port)
 

@@ -15,6 +15,7 @@ DEFAULT_TABS = [
     ("positions", "持仓", "system", 10, 1),
     ("all", "全部", "system", 20, 1),
     ("decisions", "已决策", "system", 30, 1),
+    ("next_day_watch", "明日关注", "system", 40, 1),
 ]
 
 

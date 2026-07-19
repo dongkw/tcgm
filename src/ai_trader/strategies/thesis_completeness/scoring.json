@@ -1,0 +1,19 @@
+{
+  "strategy_id": "thesis-completeness",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "base_score": 50,
+  "min_score": 0,
+  "max_score": 100,
+  "rule_weights": {
+    "F-CORE": {"PASS": 0, "UNKNOWN": 0},
+    "F-CATALYST": {"PASS": 0, "UNKNOWN": 0},
+    "F-INVALIDATION-FUNDAMENTAL": {"PASS": 0, "UNKNOWN": 0},
+    "F-INVALIDATION-TECHNICAL": {"PASS": 0, "UNKNOWN": 0},
+    "F-INVALIDATION-EVENT": {"PASS": 0, "UNKNOWN": 0}
+  },
+  "thresholds": [
+    {"min_score": 50, "signal": "NEUTRAL"},
+    {"min_score": 0, "signal": "STRONG_OPPOSE"}
+  ]
+}

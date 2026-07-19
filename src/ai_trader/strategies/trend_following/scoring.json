@@ -1,0 +1,23 @@
+{
+  "strategy_id": "trend-following",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "base_score": 50,
+  "min_score": 0,
+  "max_score": 100,
+  "rule_weights": {
+    "TF_PRICE_MA20": {"PASS": 10, "FAIL": -12},
+    "TF_PRICE_MA60": {"PASS": 12, "FAIL": -15},
+    "TF_MA20_SLOPE": {"PASS": 10, "FAIL": -8},
+    "TF_MA60_SLOPE": {"PASS": 12, "FAIL": -10},
+    "TF_CHASE_RISK": {"PASS": 3, "WARN": -10, "FAIL": -25},
+    "TF_VOLATILITY": {"PASS": 3, "WARN": -7, "FAIL": -15}
+  },
+  "thresholds": [
+    {"min_score": 82, "signal": "STRONG_SUPPORT"},
+    {"min_score": 65, "signal": "SUPPORT"},
+    {"min_score": 45, "signal": "NEUTRAL"},
+    {"min_score": 25, "signal": "OPPOSE"},
+    {"min_score": 0, "signal": "STRONG_OPPOSE"}
+  ]
+}

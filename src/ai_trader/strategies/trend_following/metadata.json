@@ -1,0 +1,27 @@
+{
+  "strategy_id": "trend-following",
+  "name": "趋势跟随",
+  "strategy_family": "TREND",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "BUY",
+  "implementation_type": "RULE_BASED",
+  "maturity": "PAPER_ONLY",
+  "calibration_status": "UNCALIBRATED",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": [
+    "technical.ma20",
+    "technical.ma60",
+    "technical.ma20_slope_up",
+    "technical.ma60_slope_up",
+    "technical.above_ma20",
+    "technical.above_ma60",
+    "technical.change_20d_pct",
+    "technical.atr14_pct",
+    "technical.high_20d",
+    "technical.low_20d"
+  ],
+  "optional_features": [],
+  "enabled": true
+}

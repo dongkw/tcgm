@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block title %}盘后数据 - 天才交易员{% endblock %}
 {% block content %}
+{% if (latest_full_market and latest_full_market.running) or (latest_close_run and latest_close_run.running) %}
+<meta http-equiv="refresh" content="5">
+{% endif %}
 <section class="page-header">
   <div>
     <h1>盘后数据</h1>
-    <p>收盘后统一拉取并落库行情，随后同步持仓和账户估值，供盘后诊股读取。</p>
+    <p>先固定日终行情，再用已固定快照同步持仓和账户；小范围拉取只作为补采备用。</p>
   </div>
   <div class="action-row">
     <a class="button-link secondary" href="{{ url_for('post_market_diagnosis_page') }}">去盘后诊股</a>
@@ -12,7 +15,109 @@
 </section>
 
 <section class="panel">
-  <div class="panel-header"><h2>运行盘后数据准备</h2></div>
+  <div class="panel-header">
+    <h2>收盘一键执行</h2>
+    {% if latest_close_run %}<span class="muted">最近流程：{{ latest_close_run.run_id }}</span>{% endif %}
+  </div>
+  <div class="post-market-form">
+    <form class="form-field" method="post" action="{{ url_for('action_post_market_close_run') }}">
+      <span class="field-label">执行范围</span>
+      <input name="limit" value="20" placeholder="留空=全市场；默认 20 用于测试">
+      <button type="submit">收盘一键执行</button>
+    </form>
+    <div class="form-field wide">
+      <span class="field-label">目标结果</span>
+      <div class="muted">固定历史数据、同步持仓和账户、生成明日关注池，并同步到自选股“明日关注”tab。</div>
+      {% if latest_close_run %}
+      <div class="progress-shell">
+        <div class="progress-bar" style="width: {{ latest_close_run.progress_pct }}%;"></div>
+      </div>
+      <div class="muted">
+        全市场 {{ latest_close_run.done_count }} / {{ latest_close_run.total_count }}
+        （成功 {{ latest_close_run.success_count }}，失败 {{ latest_close_run.failed_count }}）
+        <span class="status-pill {{ latest_close_run.status | status_class }}">{{ latest_close_run.status | dash }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% if latest_close_run %}
+  <div class="table-wrap">
+    <table class="small-table">
+      <tbody>
+        <tr>
+          <th>1 全市场采集</th><td><span class="status-pill {{ latest_close_run.full_market_status | status_class }}">{{ latest_close_run.full_market_status | dash }}</span></td>
+          <th>2 盘后准备</th><td><span class="status-pill {{ latest_close_run.prepare_status | status_class }}">{{ latest_close_run.prepare_status | dash }}</span></td>
+        </tr>
+        <tr>
+          <th>3 盘后诊股</th><td><span class="status-pill {{ latest_close_run.diagnosis_status | status_class }}">{{ latest_close_run.diagnosis_status | dash }}</span></td>
+          <th>4 同步明日关注</th><td><span class="status-pill {{ latest_close_run.watchlist_status | status_class }}">{{ latest_close_run.watchlist_status | dash }}</span></td>
+        </tr>
+        <tr>
+          <th>明日关注</th><td>{{ latest_close_run.next_watch_count | dash }}</td>
+          <th>错误</th><td class="wrap-cell">{{ latest_close_run.error_message | dash }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2>单独工具：全市场盘后采集</h2>
+    {% if latest_full_market %}<span class="muted">最近批次：{{ latest_full_market.batch_id }}</span>{% endif %}
+  </div>
+  <div class="post-market-form">
+    <form class="form-field" method="post" action="{{ url_for('action_full_market_data_collect') }}">
+      <span class="field-label">采集范围</span>
+      <input name="limit" value="20" placeholder="留空=全市场；默认 20 用于测试">
+      <button type="submit">开始全市场采集</button>
+    </form>
+    <div class="form-field wide">
+      <span class="field-label">进度</span>
+      {% if latest_full_market %}
+      <div class="progress-shell">
+        <div class="progress-bar" style="width: {{ latest_full_market.progress_pct }}%;"></div>
+      </div>
+      <div class="muted">
+        {{ latest_full_market.done_count }} / {{ latest_full_market.total_count }}
+        （成功 {{ latest_full_market.success_count }}，失败 {{ latest_full_market.failed_count }}）
+        <span class="status-pill {{ latest_full_market.status | status_class }}">{{ latest_full_market.status | dash }}</span>
+      </div>
+      {% else %}
+      <div class="muted">暂无全市场采集批次。</div>
+      {% endif %}
+    </div>
+  </div>
+  {% if full_market_failed_items %}
+  <div class="table-wrap">
+    <table class="small-table">
+      <thead><tr><th>失败代码</th><th>名称</th><th>错误</th><th>时间</th></tr></thead>
+      <tbody>
+        {% for item in full_market_failed_items %}
+        <tr><td>{{ item.symbol }}</td><td>{{ item.name | dash }}</td><td>{{ item.error_message | short_text(80) }}</td><td>{{ item.finished_at | datetime }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-header"><h2>单独工具：盘后准备（不拉行情）</h2></div>
+  <div class="post-market-form">
+    <div class="form-field wide">
+      <span class="field-label">用途</span>
+      <div class="muted">读取最新日终历史快照，检查持仓缺口，并同步持仓市值、浮盈亏、账户资产和仓位。</div>
+    </div>
+    <form class="form-actions" method="post" action="{{ url_for('action_post_market_snapshot_prepare') }}">
+      <button type="submit">执行盘后准备</button>
+    </form>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header"><h2>小范围补采（备用）</h2></div>
   <form class="post-market-form" method="post" action="{{ url_for('action_post_market_data_prep_run') }}">
     <div class="form-field">
       <span class="field-label">范围</span>
@@ -29,7 +134,7 @@
       </div>
     </div>
     <div class="form-actions">
-      <button type="submit">准备盘后数据</button>
+      <button class="secondary" type="submit">补采选中范围</button>
     </div>
   </form>
 </section>

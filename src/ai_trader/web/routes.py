@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote
@@ -102,6 +103,53 @@ def decision_detail_page(request: Request, decision_id: str) -> HTMLResponse:
     return render(request, "decision_detail.html", "decisions", {"decision": detail})
 
 
+@router.get("/strategy-context", response_class=HTMLResponse)
+def strategy_context_page(request: Request) -> HTMLResponse:
+    symbol = request.query_params.get("symbol") or ""
+    try:
+        data = services.strategy_context_page_data(settings(request), symbol)
+        return render(request, "strategy_context.html", "decisions", data)
+    except Exception as exc:
+        return redirect("/decisions", error=f"打开策略输入失败：{exc}")
+
+
+@router.post("/actions/strategy-analysis")
+async def action_strategy_analysis(request: Request) -> RedirectResponse:
+    try:
+        form = parse_qs((await request.body()).decode("utf-8", errors="replace"))
+        symbol = (form.get("symbol") or [""])[0]
+        result = commands.generate_strategy_analysis(settings(request), symbol)
+        return redirect(f"/decisions/{quote(result['decision_id'])}")
+    except Exception as exc:
+        return redirect("/decisions", error=f"生成多策略分析失败：{exc}")
+
+
+@router.post("/actions/strategy-context-save")
+async def action_strategy_context_save(request: Request) -> RedirectResponse:
+    form = parse_qs(
+        (await request.body()).decode("utf-8", errors="replace"),
+        keep_blank_values=True,
+    )
+    symbol = (form.get("symbol") or [""])[0]
+    try:
+        field_names = (
+            "holding_period", "stock_type", "future_eps", "high_risk",
+            "core_logic", "catalyst", "medium_term_improvement", "tracking_metric",
+            "fundamental_invalidation", "technical_invalidation", "event_invalidation",
+            "business_model_stable", "profit_quality_5y", "cashflow_reliable",
+            "competition_not_worse", "logic_still_valid", "thesis_fully_realized",
+            "would_rebuy_now",
+        )
+        values = {field: (form.get(field) or [""])[0] for field in field_names}
+        commands.save_strategy_context_profile(settings(request), symbol, values)
+        if (form.get("next_action") or [""])[0] == "analyze":
+            result = commands.generate_strategy_analysis(settings(request), symbol)
+            return redirect(f"/decisions/{quote(result['decision_id'])}")
+        return redirect(f"/strategy-context?symbol={quote(symbol)}", "策略输入已保存")
+    except Exception as exc:
+        return redirect(f"/strategy-context?symbol={quote(symbol)}", error=f"保存策略输入失败：{exc}")
+
+
 @router.get("/plans", response_class=HTMLResponse)
 def plans_page(request: Request) -> HTMLResponse:
     s = settings(request)
@@ -135,6 +183,11 @@ def strategy_iterations_page(request: Request) -> HTMLResponse:
         "strategy_iterations",
         {"iterations": services.strategy_iterations(settings(request))},
     )
+
+
+@router.get("/strategies", response_class=HTMLResponse)
+def strategies_page(request: Request) -> HTMLResponse:
+    return render(request, "strategies.html", "strategies", services.strategy_catalog())
 
 
 @router.get("/reports", response_class=HTMLResponse)
@@ -195,6 +248,16 @@ def post_market_data_prep_page(request: Request) -> HTMLResponse:
         "post_market_data_prep.html",
         "post_market_data",
         services.post_market_data_prep_page(settings(request)),
+    )
+
+
+@router.get("/historical-data", response_class=HTMLResponse)
+def historical_data_page(request: Request) -> HTMLResponse:
+    return render(
+        request,
+        "historical_data.html",
+        "historical_data",
+        services.historical_data_page(settings(request)),
     )
 
 
@@ -387,6 +450,65 @@ async def action_post_market_data_prep_run(request: Request) -> RedirectResponse
         )
     except Exception as exc:
         return redirect("/post-market-data", error=f"盘后数据准备失败：{exc}")
+
+
+@router.post("/actions/post-market-snapshot-prepare")
+async def action_post_market_snapshot_prepare(request: Request) -> RedirectResponse:
+    try:
+        result = commands.run_post_market_snapshot_prepare(settings(request))
+        sync = result.get("valuation_sync") or {}
+        return redirect(
+            "/post-market-data",
+            f"盘后准备完成：交易日 {result.get('trade_date')}，持仓 {result.get('success_count')} 可用，缺数据 {result.get('failed_count')}，同步持仓 {sync.get('positions') or 0} 条，账户 {sync.get('accounts') or 0} 个",
+        )
+    except Exception as exc:
+        return redirect("/post-market-data", error=f"盘后准备失败：{exc}")
+
+
+@router.post("/actions/post-market-close-run")
+async def action_post_market_close_run(request: Request) -> RedirectResponse:
+    try:
+        form = parse_qs((await request.body()).decode("utf-8", errors="replace"))
+        limit_text = (form.get("limit") or [""])[0].strip()
+        limit = int(limit_text) if limit_text else None
+        result = commands.create_post_market_close_workflow(settings(request), limit=limit)
+        if not result.get("already_running"):
+            thread = threading.Thread(
+                target=commands.run_post_market_close_workflow,
+                args=(settings(request), result["run_id"]),
+                kwargs={"limit": limit},
+                daemon=True,
+                name=f"post-market-close-{result['run_id']}",
+            )
+            thread.start()
+        prefix = "收盘流程正在运行" if result.get("already_running") else "收盘流程已启动"
+        return redirect("/post-market-data", f"{prefix}：{result.get('run_id')}")
+    except Exception as exc:
+        return redirect("/post-market-data", error=f"启动收盘流程失败：{exc}")
+
+
+@router.post("/actions/full-market-data-collect")
+async def action_full_market_data_collect(request: Request) -> RedirectResponse:
+    try:
+        form = parse_qs((await request.body()).decode("utf-8", errors="replace"))
+        limit_text = (form.get("limit") or [""])[0].strip()
+        limit = int(limit_text) if limit_text else None
+        result = commands.create_full_market_data_collection(settings(request), limit=limit)
+        if not result.get("already_running"):
+            thread = threading.Thread(
+                target=commands.run_full_market_data_collection,
+                args=(settings(request), result["batch_id"]),
+                daemon=True,
+                name=f"full-market-data-{result['batch_id']}",
+            )
+            thread.start()
+        prefix = "全市场盘后采集正在运行" if result.get("already_running") else "全市场盘后采集已启动"
+        return redirect(
+            "/post-market-data",
+            f"{prefix}：{result.get('total')} 只，批次 {result.get('batch_id')}",
+        )
+    except Exception as exc:
+        return redirect("/post-market-data", error=f"启动全市场采集失败：{exc}")
 
 
 @router.post("/actions/next-day-watch-review")

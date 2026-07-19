@@ -44,9 +44,23 @@ def datetime_text(value: Any) -> str:
 
 def status_class(value: Any) -> str:
     text = str(value or "").upper()
-    if text in {"ERROR", "FAILED", "REJECTED", "BLOCKED", "DATA_BLOCKED", "RISK", "IGNORE", "HIGH", "SELL_RISK"}:
+    if text in {
+        "ERROR",
+        "FAILED",
+        "REJECTED",
+        "BLOCKED",
+        "DATA_BLOCKED",
+        "RISK",
+        "IGNORE",
+        "HIGH",
+        "SELL_RISK",
+        "UNFAVORABLE",
+        "OPPOSE",
+        "STRONG_OPPOSE",
+        "EXIT_SUPPORT",
+    }:
         return "status-danger"
-    if text in {"WARNING", "WARN", "STALE", "MISSING", "NO_SELL_T_PLUS", "DATA_GAP", "DEFER", "MEDIUM", "POSITION_RISK", "TRADE_LIMIT", "NEED_DECISION", "PARTIAL"}:
+    if text in {"WARNING", "WARN", "STALE", "MISSING", "NO_SELL_T_PLUS", "DATA_GAP", "DEFER", "MEDIUM", "POSITION_RISK", "TRADE_LIMIT", "NEED_DECISION", "PARTIAL", "MIXED", "REDUCE_SUPPORT"}:
         return "status-warning"
     if text in {
         "OK",
@@ -62,6 +76,10 @@ def status_class(value: Any) -> str:
         "LOW",
         "OK",
         "TAKE_PROFIT",
+        "FAVORABLE",
+        "SUPPORT",
+        "STRONG_SUPPORT",
+        "HOLD_SUPPORT",
     }:
         return "status-ok"
     if text in {
@@ -77,6 +95,8 @@ def status_class(value: Any) -> str:
         "UNREVIEWED",
         "VIEWED",
         "DONE",
+        "RUNNING",
+        "PENDING",
     }:
         return "status-info"
     return "status-muted"

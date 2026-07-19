@@ -1,0 +1,17 @@
+{
+  "strategy_id": "pretrade-veto",
+  "name": "前置硬否决",
+  "strategy_family": "HARD_GATE_A",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "BUY",
+  "implementation_type": "RULE_BASED",
+  "maturity": "PAPER_ONLY",
+  "calibration_status": "UNCALIBRATED",
+  "aggregation_role": "VETO",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": ["engine_flags.a2_deducted_profit_negative_2y", "engine_flags.chase_high_1m_over_80_pct"],
+  "optional_features": ["announcements.减持", "announcements.监管"],
+  "enabled": true
+}

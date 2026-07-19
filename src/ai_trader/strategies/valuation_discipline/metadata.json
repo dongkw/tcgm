@@ -1,0 +1,17 @@
+{
+  "strategy_id": "valuation-discipline",
+  "name": "估值回报纪律",
+  "strategy_family": "HARD_GATE_D",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "BUY",
+  "implementation_type": "RULE_BASED",
+  "maturity": "PAPER_ONLY",
+  "calibration_status": "UNCALIBRATED",
+  "aggregation_role": "VETO",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": ["valuation.pe_ttm", "valuation.pe_5y_median", "valuation.latest_effective_report.ttm_eps", "quote.price"],
+  "optional_features": ["earnings_forecast.future_eps", "quote.dividend_yield_pct", "decision_context.stock_type", "decision_context.future_eps", "decision_context.high_risk"],
+  "enabled": true
+}

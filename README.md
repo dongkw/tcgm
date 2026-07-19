@@ -99,6 +99,20 @@ data/沪深A股代码（不含创业板）.csv
 python .\build_decision.py 002563 --task buy
 ```
 
+运行 v0.2 多策略买入研究并生成中文技术报告：
+
+```powershell
+python .\multi_strategy.py 000969 --task buy
+```
+
+运行 v0.2 持仓技术退出研究：
+
+```powershell
+python .\multi_strategy.py 000969 --task holding --avg-cost 20.8022 --total-quantity 200 --available-quantity 200 --invalidation-point 19.80
+```
+
+AI 研究策略使用受约束的 Provider 接口，只允许 `evidence_extract`、`evidence_classify` 和 `research_summary` 三类固定任务。Web 默认通过本机已登录的 `codex-cli` 执行固定研究摘要；CLI 在临时目录和只读沙箱运行，只接收白名单证据并输出固定 JSON Schema。AI 输出必须引用本次请求中的证据 ID，包含买卖、订单、持仓或账户字段时会被拒绝。未安装、未登录、超时或校验失败时 `ai-research` 保持 `BLOCKED`，其他代码策略继续运行。接口和替换 Provider 的方式见 [受约束 AI 研究接口设计](docs/10_ai_interface_AI接口设计_v0.1.md)。
+
 初始化模拟盘：
 
 ```powershell
@@ -196,11 +210,31 @@ python .\database.py backup
 python .\web_dashboard.py
 ```
 
+临时关闭 AI，或显式选择 Codex 模型：
+
+```powershell
+python .\web_dashboard.py --ai-provider disabled
+$env:AI_TRADER_AI_PROVIDER = "codex-cli"
+$env:AI_TRADER_AI_MODEL = "模型名"
+$env:AI_TRADER_AI_TIMEOUT_SECONDS = "120"
+python .\web_dashboard.py
+```
+
+当前 Codex CLI 单次独立研究调用约需一分钟，只用于单股研究。全市场批量诊股暂不逐股调用 AI，后续必须先接入任务队列、结果缓存、速率限制和成本上限。
+
 浏览器打开：
 
 ```text
 http://127.0.0.1:8000
 ```
+
+在“决策”页面输入 6 位股票代码并点击“生成多策略分析”，系统会先刷新该股票数据，再运行 v0.2 策略。非持仓股票只运行买入/加仓策略；持仓股票会分别运行买入/加仓与持仓退出策略，并合并为一条可追溯的页面记录和中文报告。运行快照、各策略结果、汇总结果与页面分析记录均写入 SQLite，不依赖 JSON 作为页面数据源。
+
+对于周期、估值假设、三段式投资逻辑和持仓逻辑复核等无法从行情直接得到的字段，先在“决策”页面点击“配置并分析”。策略输入页会把当前输入保存到 `strategy_context_profiles`，并在 `strategy_context_revisions` 追加修订记录；以后直接分析同一股票时会自动加载最新版本。未知信息保持为空，策略应返回 `BLOCKED` 或 `UNKNOWN`，不能用程序猜测补齐。
+
+“策略库”页面直接读取代码注册表，展示策略代码、实现文件、元数据、评分配置、规则分值和信号阈值；新增并注册策略后会自动进入该页面。
+
+当前注册 10 条独立策略。决策引擎条款与代码目录的对应关系见 [股票投资决策引擎 v2.0 策略代码映射](docs/股票投资决策引擎_v2.0_策略代码映射.md)。
 
 ## 当前能力
 
@@ -267,6 +301,8 @@ http://127.0.0.1:8000
 - [08 数据库主写入改造开发落地说明](docs/08_数据库主写入改造_开发落地说明_v0.1.md)
 - [01 data_catalog 有效数据目录设计](docs/01_data_catalog_有效数据目录设计_v0.1.md)
 - [02 strategy_engine 策略与信号设计](docs/02_strategy_engine_策略与信号设计_v0.1.md)
+- [02 strategy_platform 多策略与评分设计 v0.2](docs/02_strategy_platform_多策略与评分设计_v0.2.md)
+- [02 strategy_platform 开发落地说明 v0.2](docs/02_strategy_platform_开发落地说明_v0.2.md)
 - [03 timekeeper 时间与交易日历设计](docs/03_timekeeper_时间与交易日历设计_v0.1.md)
 - [04 backtesting 回测与模拟盘设计](docs/04_backtesting_回测与模拟盘设计_v0.1.md)
 - [05 portfolio 持仓与资金系统设计](docs/05_portfolio_持仓与资金系统设计_v0.1.md)
@@ -277,5 +313,6 @@ http://127.0.0.1:8000
 - [持仓人工维护规则](docs/持仓人工维护规则_v0.1.md)
 - [盘前持仓检查开发落地说明](docs/盘前持仓检查_开发落地说明_v0.1.md)
 - [盘后批量诊股与明日关注池设计](docs/盘后批量诊股_明日关注池设计_v0.1.md)
+- [历史数据、盘中盘后与历史回放统一设计](docs/历史数据_盘中盘后_回放统一设计_v0.1.md)
 - [股票投资决策引擎](docs/股票投资决策引擎（AI执行版%20v2.0）.md)
 - [数据字段与规则映射](docs/股票决策数据底稿_字段说明与规则映射.md)

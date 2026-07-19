@@ -1,0 +1,17 @@
+{
+  "strategy_id": "horizon-fit-gate",
+  "name": "周期意图匹配",
+  "strategy_family": "HARD_GATE_B",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "task_type": "BUY",
+  "implementation_type": "RULE_BASED",
+  "maturity": "DRAFT",
+  "calibration_status": "UNCALIBRATED",
+  "aggregation_role": "VETO",
+  "supported_asset_types": ["A_STOCK"],
+  "supported_market_phases": ["POST_MARKET", "PRE_MARKET", "HISTORICAL_REPLAY", "PAPER_TRADING"],
+  "required_features": [],
+  "optional_features": ["decision_context.holding_period", "decision_context.catalyst", "decision_context.medium_term_improvement", "decision_context.tracking_metric", "decision_context.business_model_stable", "decision_context.profit_quality_5y", "decision_context.cashflow_reliable", "decision_context.competition_not_worse"],
+  "enabled": true
+}

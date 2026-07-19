@@ -91,12 +91,17 @@ button:disabled {
 }
 
 input,
-textarea {
+textarea,
+select {
   min-height: 34px;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 0 10px;
   font: inherit;
+}
+
+select {
+  background: var(--surface);
 }
 
 textarea {
@@ -315,6 +320,72 @@ textarea {
 
 .table-wrap {
   overflow-x: auto;
+}
+
+.strategy-summary {
+  margin-bottom: 16px;
+}
+
+.strategy-summary > div:last-child {
+  grid-column: span 2;
+}
+
+.strategy-hash,
+.strategy-panel code,
+.strategy-code-table code {
+  overflow-wrap: anywhere;
+}
+
+.strategy-panel {
+  scroll-margin-top: 16px;
+}
+
+.strategy-panel-header > div {
+  min-width: 0;
+}
+
+.strategy-panel-header code {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.strategy-metadata,
+.strategy-boundaries,
+.strategy-block,
+.strategy-config-grid {
+  margin: 16px;
+}
+
+.strategy-block h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.strategy-code-table th {
+  width: 150px;
+}
+
+.strategy-code-table td {
+  white-space: normal;
+}
+
+.strategy-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.5fr);
+  gap: 16px;
+}
+
+.strategy-config-grid .strategy-block {
+  min-width: 0;
+  margin: 0;
+}
+
+.score-weight {
+  display: inline-block;
+  margin: 2px 10px 2px 0;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
 }
 
 table {
@@ -551,10 +622,38 @@ tr:last-child td {
   justify-content: flex-end;
 }
 
+.progress-shell {
+  position: relative;
+  height: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+}
+
+.progress-bar {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 0.25s ease;
+}
+
 .form-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.strategy-context-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.holding-review-grid {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .tab-row {
@@ -715,9 +814,14 @@ tr:last-child td {
   .layout-two,
   .metadata-grid,
   .settings-grid,
+  .strategy-config-grid,
   .toolbar-grid,
   .post-market-form {
     grid-template-columns: 1fr;
+  }
+
+  .strategy-summary > div:last-child {
+    grid-column: auto;
   }
 
   .topbar,

@@ -1,0 +1,18 @@
+{
+  "strategy_id": "holding-thesis-exit",
+  "strategy_version": "1.0.0",
+  "parameter_version": "1",
+  "base_score": 0,
+  "min_score": 0,
+  "max_score": 100,
+  "rule_weights": {
+    "H-LOGIC-VALID": {"PASS": 0, "FAIL": 100, "UNKNOWN": 0},
+    "H-THESIS-REALIZED": {"PASS": 40, "FAIL": 0, "UNKNOWN": 0},
+    "H-WOULD-REBUY": {"PASS": 0, "FAIL": 40, "UNKNOWN": 0}
+  },
+  "thresholds": [
+    {"min_score": 75, "signal": "EXIT_SUPPORT"},
+    {"min_score": 30, "signal": "REDUCE_SUPPORT"},
+    {"min_score": 0, "signal": "HOLD_SUPPORT"}
+  ]
+}
